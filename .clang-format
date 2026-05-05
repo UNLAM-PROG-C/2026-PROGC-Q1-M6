@@ -1,0 +1,7 @@
+Language: Cpp
+BasedOnStyle: Google
+BreakBeforeBraces: Allman
+AllowShortFunctionsOnASingleLine: None
+DerivePointerAlignment: false
+PointerAlignment: Right
+ColumnLimit: 180
