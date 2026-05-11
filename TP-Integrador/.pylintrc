@@ -1,0 +1,32 @@
+[MAIN]
+# Extensiones de pylint a cargar
+load-plugins=
+
+[FORMAT]
+# Limite de caracteres por linea (regla de la catedra)
+max-line-length=80
+# Limite de lineas por modulo
+max-module-lines=300
+# Indentacion: 4 espacios
+indent-string='    '
+
+[DESIGN]
+max-args=7
+max-locals=15
+max-returns=6
+max-branches=12
+max-statements=50
+max-parents=7
+max-attributes=10
+max-bool-expr=5
+
+[MESSAGES CONTROL]
+disable=
+    # R0903: too-few-public-methods
+    # Los backends (GPUBackend, CUDABackend, etc.) son interfaces Strategy
+    # con un unico metodo publico por diseno — no es un defecto.
+    R0903,
+    # W0611: unused-import
+    # numpy se importa para anotaciones de tipo (np.ndarray) en backend.py.
+    # Pylint no siempre detecta el uso en type hints de funciones stub.
+    W0611
