@@ -1,0 +1,24 @@
+# Entornos virtuales
+venv/
+.venv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Variables de entorno
+.env
+
+# Carpetas de imagenes de prueba
+sample_images/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Asistente IA
+.claude/

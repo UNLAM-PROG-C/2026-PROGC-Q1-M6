@@ -1,0 +1,17 @@
+[MASTER]
+
+[MESSAGES CONTROL]
+# Deshabilitados con justificacion:
+# missing-module-docstring: los __init__.py vacios no necesitan docstring
+# too-few-public-methods: las clases base de interfaz (GPUBackend, etc.)
+#   tienen pocos metodos por diseno; no son clases de datos ni helpers
+disable=missing-module-docstring,
+        too-few-public-methods
+
+[FORMAT]
+max-line-length=80
+
+[DESIGN]
+max-module-lines=300
+max-args=7
+max-attributes=10
