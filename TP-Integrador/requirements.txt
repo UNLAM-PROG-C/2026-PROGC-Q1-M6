@@ -1,8 +1,5 @@
 pillow
 opencv-python
 numpy
-numba
-pyopencl
-matplotlib
 pylint
 pytest
