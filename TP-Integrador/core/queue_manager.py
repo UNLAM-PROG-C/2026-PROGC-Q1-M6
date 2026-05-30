@@ -1,72 +1,48 @@
-"""Cola thread-safe para el pipeline productor-consumidor de ParallelVision."""
+"""Cola thread-safe para el pipeline productor-consumidor.
+
+Envuelve ``queue.Queue`` con una interfaz acotada y explícita, sin
+exponer la cola interna al resto del pipeline.
+"""
+
+from __future__ import annotations
 
 import queue
+from typing import Any
+
+DEFAULT_QUEUE_SIZE: int = 32
 
 
 class ImageQueue:
-    """Cola thread-safe de paths de imágenes para el pipeline.
+    """Cola thread-safe acotada para paths de imágenes y resultados."""
 
-    Actúa como buffer entre el productor (carga de imágenes) y los
-    consumidores (workers CPU/GPU). Envuelve queue.Queue con una
-    interfaz explícita para facilitar el testing y el mocking.
-    """
-
-    def __init__(self, maxsize: int = 0) -> None:
-        """Inicializa la cola interna.
+    def __init__(self, maxsize: int) -> None:
+        """Inicializa la cola interna con un tamaño máximo.
 
         Args:
-            maxsize: Capacidad máxima. 0 significa ilimitada.
+            maxsize: Capacidad máxima de la cola.
         """
-        self._queue: queue.Queue[str] = queue.Queue(maxsize=maxsize)
+        self._queue: queue.Queue = queue.Queue(maxsize=maxsize)
 
-    def put(self, item: str) -> None:
-        """Encola un path de imagen. Bloquea si la cola está llena.
+    def put(self, item: Any) -> None:
+        """Encola un elemento, bloqueando si la cola está llena."""
+        self._queue.put(item)
 
-        Args:
-            item: Path absoluto a la imagen a procesar.
-
-        Raises:
-            NotImplementedError: Implementado en feature/image-loader-queue.
-        """
-        raise NotImplementedError
-
-    def get(self) -> str:
-        """Desencola y retorna el siguiente path. Bloquea si está vacía.
-
-        Returns:
-            Path absoluto a la siguiente imagen a procesar.
-
-        Raises:
-            NotImplementedError: Implementado en feature/image-loader-queue.
-        """
-        raise NotImplementedError
+    def get(self) -> Any:
+        """Desencola un elemento, bloqueando si la cola está vacía."""
+        return self._queue.get()
 
     def task_done(self) -> None:
-        """Señala que el item obtenido con get() fue procesado.
+        """Señala que un elemento obtenido con get() fue procesado."""
+        self._queue.task_done()
 
-        Raises:
-            NotImplementedError: Implementado en feature/image-loader-queue.
-        """
-        raise NotImplementedError
+    def join(self) -> None:
+        """Bloquea hasta que todos los elementos sean procesados."""
+        self._queue.join()
 
     def empty(self) -> bool:
-        """Indica si la cola está vacía en este instante.
-
-        Returns:
-            True si no hay items en la cola, False en caso contrario.
-
-        Raises:
-            NotImplementedError: Implementado en feature/image-loader-queue.
-        """
-        raise NotImplementedError
+        """Indica si la cola está vacía en este instante."""
+        return self._queue.empty()
 
     def qsize(self) -> int:
-        """Retorna el número aproximado de items en la cola.
-
-        Returns:
-            Cantidad de items pendientes (aproximada; no usar para sync).
-
-        Raises:
-            NotImplementedError: Implementado en feature/image-loader-queue.
-        """
-        raise NotImplementedError
+        """Devuelve el tamaño aproximado de la cola."""
+        return self._queue.qsize()

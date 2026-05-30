@@ -1,14 +1,20 @@
 [MAIN]
 # Extensiones de pylint a cargar
 load-plugins=
+# cv2 es una extension en C; pylint no introspecta sus miembros.
+extension-pkg-allow-list=cv2
 
 [FORMAT]
 # Limite de caracteres por linea (regla de la catedra)
 max-line-length=80
 # Limite de lineas por modulo
-max-module-lines=300
+max-module-lines=200
 # Indentacion: 4 espacios
 indent-string='    '
+
+[TYPECHECK]
+# cv2 expone sus miembros dinámicamente; se confía en su API.
+generated-members=cv2.*
 
 [DESIGN]
 max-args=7
@@ -29,4 +35,8 @@ disable=
     # W0611: unused-import
     # numpy se importa para anotaciones de tipo (np.ndarray) en backend.py.
     # Pylint no siempre detecta el uso en type hints de funciones stub.
-    W0611
+    W0611,
+    # W0511: fixme
+    # El comentario TODO de detección CUDA/OpenCL es exigido por la
+    # consigna como marcador de una iteración futura.
+    W0511
