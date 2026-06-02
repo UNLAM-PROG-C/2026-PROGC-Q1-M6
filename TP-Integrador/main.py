@@ -12,7 +12,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from core.backend import VALID_OPERATIONS, CPUBackend, get_backend
-from core.metrics import MetricsCollector
+from core.metrics import CPU_BACKEND, MetricsCollector
 from core.queue_manager import DEFAULT_QUEUE_SIZE, ImageQueue
 from pipeline.image_loader import enqueue_paths, scan_folder
 from pipeline.result_aggregator import ResultAggregator
@@ -50,7 +50,8 @@ def _process_images(
     executor = ThreadPoolExecutor(max_workers=args.workers)
     for _ in range(args.workers):
         worker = ProcessingWorker(
-            input_queue, result_queue, backend, args.operation)
+            input_queue, result_queue, backend, args.operation,
+            backend_label=CPU_BACKEND)
         executor.submit(worker.run)
     enqueue_paths(paths, input_queue, args.workers)
     executor.shutdown(wait=True)
