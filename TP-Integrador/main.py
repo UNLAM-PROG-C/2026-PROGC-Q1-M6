@@ -15,6 +15,7 @@ from core.backend import VALID_OPERATIONS, CPUBackend, get_backend
 from core.metrics import CPU_BACKEND, MetricsCollector
 from core.queue_manager import DEFAULT_QUEUE_SIZE, ImageQueue
 from pipeline.image_loader import enqueue_paths, scan_folder
+from pipeline.report_exporter import export_csv
 from pipeline.result_aggregator import ResultAggregator
 from pipeline.worker import MAX_WORKER_THREADS, ProcessingWorker
 
@@ -36,6 +37,7 @@ def _parse_args() -> argparse.Namespace:
         '--workers', type=int, default=MAX_WORKER_THREADS)
     parser.add_argument(
         '--queue-size', type=int, default=DEFAULT_QUEUE_SIZE)
+    parser.add_argument('--report', default=None)
     return parser.parse_args()
 
 
@@ -122,6 +124,9 @@ def main() -> None:
     args = _parse_args()
     metrics, total_seconds, backend = _run_pipeline(args)
     _print_summary(metrics, total_seconds, type(backend).__name__)
+    if args.report:
+        export_csv(metrics, args.report)
+        print(f'[INFO] Reporte CSV escrito en {args.report}')
 
 
 if __name__ == '__main__':
