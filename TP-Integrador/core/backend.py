@@ -5,9 +5,11 @@ Define el patrón Strategy con una única implementación concreta
 """
 
 from __future__ import annotations
+import math
 
 import cv2
 import numpy as np
+from numba import cuda
 
 VALID_OPERATIONS: tuple[str, ...] = (
     'grayscale',
@@ -19,6 +21,13 @@ GAUSSIAN_KERNEL_SIZE: tuple[int, int] = (5, 5)
 GAUSSIAN_SIGMA: float = 0.0
 CANNY_LOW_THRESHOLD: int = 100
 CANNY_HIGH_THRESHOLD: int = 200
+
+# CONSTANTES CUDA
+CUDA_THREADS_PER_BLOCK: int = 16
+# Formula de conversion a grayscale:
+CUDA_GRAYSCALE_RED_WEIGHT: float = 0.299
+CUDA_GRAYSCALE_GREEN_WEIGHT: float = 0.587
+CUDA_GRAYSCALE_BLUE_WEIGHT: float = 0.114
 
 
 def _to_grayscale(image: np.ndarray) -> np.ndarray:
@@ -49,6 +58,83 @@ _OPERATIONS = {
     'blur': _apply_blur,
     'equalize': _equalize,
 }
+
+
+class CUDABackend:
+    '''
+    Las operaciones que debe realizar son
+    - grayscale — kernel CUDA: 0.299*R + 0.587*G + 0.114*B por píxel en paralelo
+    - edges — implementar gradiente Sobel sobre la imagen en device, o llamar a OpenCV luego de copy_to_host (documentar elección)
+    '''
+
+    # funcion para ejecutar un kernel CUDA (o grayscale o edges) sobre la imagen dada y devolver el resultado
+    def _execute_kernel(self, image, kernel):
+
+        d_image = cuda.to_device(image)
+
+        # Buffer limpio para evitar memoria residual
+        d_output = cuda.to_device(
+            np.zeros((image.shape[0], image.shape[1]), dtype=np.uint8)
+        )
+
+        threads = (CUDA_THREADS_PER_BLOCK, CUDA_THREADS_PER_BLOCK) #Número de hilos por bloque en cada dimensión (x,y)
+
+        blocks = (
+            math.ceil(image.shape[0] / threads[0]),
+            math.ceil(image.shape[1] / threads[1])
+        )
+
+        kernel[blocks, threads](d_image, d_output) # Ejecuta el kernel recibido como parámetro
+        cuda.synchronize()
+
+        return d_output.copy_to_host()
+
+    def grayscale(self, image):
+        return self._execute_kernel(image, self._grayscale_kernel)
+
+    def edges(self, image):
+        return self._execute_kernel(image,self._edges_kernel)
+
+    #a continuacion, el backend CUDA para realizar cada funcion.
+    @cuda.jit
+    def _grayscale_kernel(image, output):
+        '''Usar pycuda para implementar el kernel de conversión a escala de grises.'''
+        x, y = cuda.grid(2) #Obtiene las coordenadas del pixel actual en la imagen
+        if x < image.shape[0] and y < image.shape[1]: #Pregunto si el pixel se encuentra dentro de los limites de la imagen.
+            #Obtiene el valor de canal de cada color del pixel (r,g,b)
+            r = image[x, y, 0]  
+            g = image[x, y, 1]
+            b = image[x, y, 2]
+            output[x, y] = CUDA_GRAYSCALE_RED_WEIGHT * r + CUDA_GRAYSCALE_GREEN_WEIGHT * g + CUDA_GRAYSCALE_BLUE_WEIGHT * b #Aplica la formula de conversion a grayscale y guarda el resultado en la imagen de salida.
+
+    @cuda.jit
+    def _edges_kernel(image, output):
+        # implementar gradiente Sobel sobre la imagen en device
+        # Sobel calcula el cambio de intensidad entre píxeles vecinos.
+
+        x, y = cuda.grid(2)
+
+        #verifica que el pixel no se encuentre en los bordes de la imagen para evitar acceder a indices fuera de rango
+        if 1 <= x < image.shape[0]-1 and 1 <= y < image.shape[1]-1: 
+
+            gx = (
+                -image[x-1, y-1] + image[x-1, y+1]
+                -2*image[x,   y-1] + 2*image[x,   y+1]
+                -image[x+1, y-1] + image[x+1, y+1]
+            )
+
+            gy = (
+                -image[x-1, y-1] -2*image[x-1, y] -image[x-1, y+1]
+                +image[x+1, y-1] +2*image[x+1, y] +image[x+1, y+1]
+            )
+
+            magnitude = math.sqrt(gx*gx + gy*gy)
+
+            if magnitude > 255:
+                magnitude = 255
+
+            output[x, y] = magnitude
+
 
 
 class CPUBackend:
