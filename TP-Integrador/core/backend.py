@@ -6,7 +6,7 @@ Define el patrón Strategy con una única implementación concreta
 
 from __future__ import annotations
 import math
-
+import logging
 import cv2
 import numpy as np
 from numba import cuda
@@ -21,6 +21,10 @@ GAUSSIAN_KERNEL_SIZE: tuple[int, int] = (5, 5)
 GAUSSIAN_SIGMA: float = 0.0
 CANNY_LOW_THRESHOLD: int = 100
 CANNY_HIGH_THRESHOLD: int = 200
+
+CPU_BACKEND_NAME = "CPU"
+CUDA_BACKEND_NAME = "CUDA"
+OPENCL_BACKEND_NAME = "OpenCL"
 
 # CONSTANTES CUDA
 CUDA_THREADS_PER_BLOCK: int = 16
@@ -51,6 +55,9 @@ def _equalize(image: np.ndarray) -> np.ndarray:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     return cv2.equalizeHist(gray)
 
+    backend = CPUBackend()
+    logging.info("Backend seleccionado: CPU")
+    return backend
 
 _OPERATIONS = {
     'grayscale': _to_grayscale,
@@ -159,11 +166,53 @@ class CPUBackend:
         return _OPERATIONS[operation](image)
 
 
+def _get_cuda_backend():
+    try:
+        from numba import cuda
+
+        if not cuda.is_available():
+            return None
+
+        backend = CUDABackend()
+        logging.info("Backend seleccionado: CUDA")
+        return backend
+
+    except Exception as exc:
+        logging.info("CUDA no disponible: %s", exc)
+        return None
+
+def _get_opencl_backend():
+    try:
+        import pyopencl as cl
+
+        if not cl.get_platforms():
+            return None
+
+        backend = OpenCLBackend()
+        logging.info("Backend seleccionado: OpenCL")
+        return backend
+
+    except Exception as exc:
+        logging.info("OpenCL no disponible: %s", exc)
+        return None
+
+def _get_cpu_backend():
+    backend = CPUBackend()
+    logging.info("Backend seleccionado: CPU")
+    return backend
+
 def get_backend() -> CPUBackend:
     """Devuelve el backend de procesamiento activo.
 
     Returns:
         Instancia de CPUBackend.
     """
-    # TODO: detección CUDA/OpenCL en futura iteración
-    return CPUBackend()
+    backend = _get_cuda_backend()
+    if backend:
+        return backend
+
+    backend = _get_opencl_backend()
+    if backend:
+        return backend
+
+    return _get_cpu_backend()
