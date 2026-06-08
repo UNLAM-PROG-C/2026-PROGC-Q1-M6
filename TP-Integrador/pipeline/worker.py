@@ -26,6 +26,8 @@ class ProcessingWorker:
         result_queue: ImageQueue,
         backend: CPUBackend,
         operation: str,
+        *,
+        backend_label: str,
     ) -> None:
         """Inicializa el worker con sus colas, backend y operación.
 
@@ -34,11 +36,13 @@ class ProcessingWorker:
             result_queue: Cola donde se publican las métricas.
             backend: Backend de procesamiento activo.
             operation: Operación a aplicar a cada imagen.
+            backend_label: Etiqueta del backend para las métricas.
         """
         self._input_queue = input_queue
         self._result_queue = result_queue
         self._backend = backend
         self._operation = operation
+        self._backend_label = backend_label
 
     def run(self) -> None:
         """Procesa imágenes hasta recibir el sentinela None."""
@@ -61,4 +65,5 @@ class ProcessingWorker:
         self._backend.process(image, self._operation)
         elapsed_ms = (time.perf_counter() - start) * MS_PER_SECOND
         name = os.path.basename(path)
-        self._result_queue.put((name, self._operation, elapsed_ms))
+        self._result_queue.put(
+            (name, self._backend_label, self._operation, elapsed_ms))
