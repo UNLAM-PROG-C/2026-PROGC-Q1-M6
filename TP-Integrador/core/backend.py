@@ -114,6 +114,12 @@ class CUDABackend:
     - edges — implementar gradiente Sobel sobre la imagen en device, o llamar a OpenCV luego de copy_to_host (documentar elección)
     '''
 
+    def __init__(self):
+        device = cuda.get_current_device()
+
+        self.backend_name = CUDA_BACKEND_NAME
+        self.device_info = str(device)
+
     # funcion para ejecutar un kernel CUDA (o grayscale o edges) sobre la imagen dada y devolver el resultado
     def _execute_kernel(self, image, kernel):
 
@@ -147,6 +153,10 @@ class CUDABackend:
 class CPUBackend:
     """Aplica operaciones de transformación de imágenes en CPU."""
 
+    def __init__(self):
+        self.backend_name = CPU_BACKEND_NAME
+        self.device_info = "CPU"
+
     def process(self, image: np.ndarray, operation: str) -> np.ndarray:
         """Aplica la operación indicada a la imagen.
 
@@ -165,6 +175,34 @@ class CPUBackend:
             raise ValueError(f'Unknown operation: {operation!r}')
         return _OPERATIONS[operation](image)
 
+class OpenCLBackend:
+
+    def __init__(self):
+        import pyopencl as cl
+
+        device = cl.get_platforms()[0].get_devices()[0]
+
+        self.backend_name = OPENCL_BACKEND_NAME
+        self.device_info = device.name
+
+    def process(self, image: np.ndarray, operation: str) -> np.ndarray:
+        """Aplica la operación indicada a la imagen.
+
+        Args:
+            image: Array NumPy con la imagen de entrada.
+            operation: Transformación a aplicar; debe pertenecer a
+                VALID_OPERATIONS.
+
+        Returns:
+            Array NumPy con la imagen procesada.
+
+        Raises:
+            ValueError: Si operation no es una operación válida.
+        """
+        if operation not in VALID_OPERATIONS:
+            raise ValueError(f'Unknown operation: {operation!r}')
+        return _OPERATIONS[operation](image)
+    
 
 def _get_cuda_backend():
     try:
