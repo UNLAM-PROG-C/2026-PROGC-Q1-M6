@@ -59,6 +59,46 @@ _OPERATIONS = {
     'equalize': _equalize,
 }
 
+#a continuacion, el backend CUDA para realizar cada funcion.
+@cuda.jit
+def grayscale_kernel(image, output):
+    '''Usar pycuda para implementar el kernel de conversión a escala de grises.'''
+    x, y = cuda.grid(2) #Obtiene las coordenadas del pixel actual en la imagen
+    if x < image.shape[0] and y < image.shape[1]: #Pregunto si el pixel se encuentra dentro de los limites de la imagen.
+        #Obtiene el valor de canal de cada color del pixel (r,g,b)
+        r = image[x, y, 0]  
+        g = image[x, y, 1]
+        b = image[x, y, 2]
+        output[x, y] = CUDA_GRAYSCALE_RED_WEIGHT * r + CUDA_GRAYSCALE_GREEN_WEIGHT * g + CUDA_GRAYSCALE_BLUE_WEIGHT * b #Aplica la formula de conversion a grayscale y guarda el resultado en la imagen de salida.
+
+@cuda.jit
+def edges_kernel(image, output):
+    # implementar gradiente Sobel sobre la imagen en device
+    # Sobel calcula el cambio de intensidad entre píxeles vecinos.
+
+    x, y = cuda.grid(2)
+
+    #verifica que el pixel no se encuentre en los bordes de la imagen para evitar acceder a indices fuera de rango
+    if 1 <= x < image.shape[0]-1 and 1 <= y < image.shape[1]-1: 
+
+        gx = (
+            -image[x-1, y-1] + image[x-1, y+1]
+            -2*image[x,   y-1] + 2*image[x,   y+1]
+            -image[x+1, y-1] + image[x+1, y+1]
+        )
+
+        gy = (
+            -image[x-1, y-1] -2*image[x-1, y] -image[x-1, y+1]
+            +image[x+1, y-1] +2*image[x+1, y] +image[x+1, y+1]
+        )
+
+        magnitude = math.sqrt(gx*gx + gy*gy)
+
+        if magnitude > 255:
+            magnitude = 255
+
+        output[x, y] = magnitude
+
 
 class CUDABackend:
     '''
@@ -90,50 +130,10 @@ class CUDABackend:
         return d_output.copy_to_host()
 
     def grayscale(self, image):
-        return self._execute_kernel(image, self._grayscale_kernel)
+        return self._execute_kernel(image, grayscale_kernel)
 
     def edges(self, image):
-        return self._execute_kernel(image,self._edges_kernel)
-
-    #a continuacion, el backend CUDA para realizar cada funcion.
-    @cuda.jit
-    def _grayscale_kernel(image, output):
-        '''Usar pycuda para implementar el kernel de conversión a escala de grises.'''
-        x, y = cuda.grid(2) #Obtiene las coordenadas del pixel actual en la imagen
-        if x < image.shape[0] and y < image.shape[1]: #Pregunto si el pixel se encuentra dentro de los limites de la imagen.
-            #Obtiene el valor de canal de cada color del pixel (r,g,b)
-            r = image[x, y, 0]  
-            g = image[x, y, 1]
-            b = image[x, y, 2]
-            output[x, y] = CUDA_GRAYSCALE_RED_WEIGHT * r + CUDA_GRAYSCALE_GREEN_WEIGHT * g + CUDA_GRAYSCALE_BLUE_WEIGHT * b #Aplica la formula de conversion a grayscale y guarda el resultado en la imagen de salida.
-
-    @cuda.jit
-    def _edges_kernel(image, output):
-        # implementar gradiente Sobel sobre la imagen en device
-        # Sobel calcula el cambio de intensidad entre píxeles vecinos.
-
-        x, y = cuda.grid(2)
-
-        #verifica que el pixel no se encuentre en los bordes de la imagen para evitar acceder a indices fuera de rango
-        if 1 <= x < image.shape[0]-1 and 1 <= y < image.shape[1]-1: 
-
-            gx = (
-                -image[x-1, y-1] + image[x-1, y+1]
-                -2*image[x,   y-1] + 2*image[x,   y+1]
-                -image[x+1, y-1] + image[x+1, y+1]
-            )
-
-            gy = (
-                -image[x-1, y-1] -2*image[x-1, y] -image[x-1, y+1]
-                +image[x+1, y-1] +2*image[x+1, y] +image[x+1, y+1]
-            )
-
-            magnitude = math.sqrt(gx*gx + gy*gy)
-
-            if magnitude > 255:
-                magnitude = 255
-
-            output[x, y] = magnitude
+        return self._execute_kernel(image, edges_kernel)
 
 
 
