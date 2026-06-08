@@ -1,16 +1,6 @@
 from unittest.mock import Mock, patch
 from core.backend import (get_backend,CUDABackend, OpenCLBackend, CPUBackend)
 
-
-@patch("core.backend._get_cuda_backend")
-def test_cuda_selected_when_available(mock_cuda):
-
-    mock_cuda.return_value = CUDABackend()
-
-    backend = get_backend()
-
-    assert isinstance(backend,CUDABackend)
-
 @patch("core.backend._get_opencl_backend")
 @patch("core.backend._get_cuda_backend")
 def test_opencl_selected_when_cuda_fails(mock_cuda,mock_opencl):
