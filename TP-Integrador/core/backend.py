@@ -51,17 +51,9 @@ def _equalize(image: np.ndarray) -> np.ndarray:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     return cv2.equalizeHist(gray)
 
-
-_OPERATIONS = {
-    'grayscale': _to_grayscale,
-    'edges': _detect_edges,
-    'blur': _apply_blur,
-    'equalize': _equalize,
-}
-
 #a continuacion, el backend CUDA para realizar cada funcion.
 @cuda.jit
-def grayscale_kernel(image, output):
+def _grayscale_kernel(image, output):
     '''Usar pycuda para implementar el kernel de conversión a escala de grises.'''
     x, y = cuda.grid(2) #Obtiene las coordenadas del pixel actual en la imagen
     if x < image.shape[0] and y < image.shape[1]: #Pregunto si el pixel se encuentra dentro de los limites de la imagen.
@@ -72,7 +64,7 @@ def grayscale_kernel(image, output):
         output[x, y] = CUDA_GRAYSCALE_RED_WEIGHT * r + CUDA_GRAYSCALE_GREEN_WEIGHT * g + CUDA_GRAYSCALE_BLUE_WEIGHT * b #Aplica la formula de conversion a grayscale y guarda el resultado en la imagen de salida.
 
 @cuda.jit
-def edges_kernel(image, output):
+def _edges_kernel(image, output):
     # implementar gradiente Sobel sobre la imagen en device
     # Sobel calcula el cambio de intensidad entre píxeles vecinos.
 
@@ -100,6 +92,19 @@ def edges_kernel(image, output):
         output[x, y] = magnitude
 
 
+
+_OPERATIONS = {
+    'grayscale': _to_grayscale,
+    'edges': _detect_edges,
+    'blur': _apply_blur,
+    'equalize': _equalize,
+}
+
+_OPERATIONS_CUDA = {
+    'grayscale': _grayscale_kernel,
+    'edges': _edges_kernel
+}
+
 class CUDABackend:
     '''
     Las operaciones que debe realizar son
@@ -108,7 +113,14 @@ class CUDABackend:
     '''
 
     # funcion para ejecutar un kernel CUDA (o grayscale o edges) sobre la imagen dada y devolver el resultado
-    def _execute_kernel(self, image, kernel):
+    def process(self, image, operation):
+
+        if operation not in _OPERATIONS_CUDA:
+            raise ValueError(f'Unknown operation: {operation!r}')
+
+        # edges recibe RGB → se convierte a gris → Sobel CUDA.
+        if operation == "edges":
+            image = _to_grayscale(image)
 
         d_image = cuda.to_device(image)
 
@@ -124,17 +136,11 @@ class CUDABackend:
             math.ceil(image.shape[1] / threads[1])
         )
 
-        kernel[blocks, threads](d_image, d_output) # Ejecuta el kernel recibido como parámetro
+        #se le pasa la cantidad de bloques e hilos que va a usar para procesar la imagen.
+        _OPERATIONS_CUDA[operation][blocks, threads](d_image, d_output) # Ejecuta la operacion recibida como parámetro
         cuda.synchronize()
 
         return d_output.copy_to_host()
-
-    def grayscale(self, image):
-        return self._execute_kernel(image, grayscale_kernel)
-
-    def edges(self, image):
-        return self._execute_kernel(image, edges_kernel)
-
 
 
 class CPUBackend:
