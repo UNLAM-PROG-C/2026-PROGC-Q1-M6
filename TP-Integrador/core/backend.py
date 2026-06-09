@@ -10,6 +10,7 @@ import logging
 import cv2
 import numpy as np
 from numba import cuda
+import pyopencl as cl
 
 VALID_OPERATIONS: tuple[str, ...] = (
     'grayscale',
@@ -54,10 +55,6 @@ def _equalize(image: np.ndarray) -> np.ndarray:
     """Ecualiza el histograma de la imagen en escala de grises."""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     return cv2.equalizeHist(gray)
-
-    backend = CPUBackend()
-    logging.info("Backend seleccionado: CPU")
-    return backend
 
 _OPERATIONS = {
     'grayscale': _to_grayscale,
@@ -149,6 +146,17 @@ class CUDABackend:
         return self._execute_kernel(image, edges_kernel)
 
 
+class OpenCLBackend:
+
+    def __init__(self):
+
+        device = cl.get_platforms()[0].get_devices()[0]
+
+        self.backend_name = OPENCL_BACKEND_NAME
+        self.device_info = device.name
+
+    #Falta implementacion
+
 
 class CPUBackend:
     """Aplica operaciones de transformación de imágenes en CPU."""
@@ -175,39 +183,9 @@ class CPUBackend:
             raise ValueError(f'Unknown operation: {operation!r}')
         return _OPERATIONS[operation](image)
 
-class OpenCLBackend:
-
-    def __init__(self):
-        import pyopencl as cl
-
-        device = cl.get_platforms()[0].get_devices()[0]
-
-        self.backend_name = OPENCL_BACKEND_NAME
-        self.device_info = device.name
-
-    def process(self, image: np.ndarray, operation: str) -> np.ndarray:
-        """Aplica la operación indicada a la imagen.
-
-        Args:
-            image: Array NumPy con la imagen de entrada.
-            operation: Transformación a aplicar; debe pertenecer a
-                VALID_OPERATIONS.
-
-        Returns:
-            Array NumPy con la imagen procesada.
-
-        Raises:
-            ValueError: Si operation no es una operación válida.
-        """
-        if operation not in VALID_OPERATIONS:
-            raise ValueError(f'Unknown operation: {operation!r}')
-        return _OPERATIONS[operation](image)
-    
 
 def _get_cuda_backend():
     try:
-        from numba import cuda
-
         if not cuda.is_available():
             return None
 
@@ -221,7 +199,6 @@ def _get_cuda_backend():
 
 def _get_opencl_backend():
     try:
-        import pyopencl as cl
 
         if not cl.get_platforms():
             return None

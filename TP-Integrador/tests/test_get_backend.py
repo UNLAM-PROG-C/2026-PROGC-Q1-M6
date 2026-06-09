@@ -49,3 +49,15 @@ def test_fallback_to_cpu_when_no_gpu(mock_cuda, mock_opencl):
     backend = get_backend()
 
     assert isinstance(backend,CPUBackend)
+
+def test_backend_name_accessible():
+
+    backend = CPUBackend()
+
+    assert hasattr(backend,"backend_name" )
+
+def test_device_info_accessible():
+
+    backend = OpenCLBackend()
+
+    assert hasattr(backend,"device_info")
