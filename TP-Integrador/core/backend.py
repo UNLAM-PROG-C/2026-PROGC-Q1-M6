@@ -6,10 +6,11 @@ Define el patrón Strategy con una única implementación concreta
 
 from __future__ import annotations
 import math
-
+import logging
 import cv2
 import numpy as np
 from numba import cuda
+import pyopencl as cl
 
 VALID_OPERATIONS: tuple[str, ...] = (
     'grayscale',
@@ -21,6 +22,10 @@ GAUSSIAN_KERNEL_SIZE: tuple[int, int] = (5, 5)
 GAUSSIAN_SIGMA: float = 0.0
 CANNY_LOW_THRESHOLD: int = 100
 CANNY_HIGH_THRESHOLD: int = 200
+
+CPU_BACKEND_NAME = "CPU"
+CUDA_BACKEND_NAME = "CUDA"
+OPENCL_BACKEND_NAME = "OpenCL"
 
 # CONSTANTES CUDA
 CUDA_THREADS_PER_BLOCK: int = 16
@@ -112,6 +117,12 @@ class CUDABackend:
     - edges — implementar gradiente Sobel sobre la imagen en device, o llamar a OpenCV luego de copy_to_host (documentar elección)
     '''
 
+    def __init__(self):
+        device = cuda.get_current_device()
+
+        self.backend_name = CUDA_BACKEND_NAME
+        self.device_info = str(device)
+
     # funcion para ejecutar un kernel CUDA (o grayscale o edges) sobre la imagen dada y devolver el resultado
     def process(self, image, operation):
 
@@ -142,9 +153,23 @@ class CUDABackend:
 
         return d_output.copy_to_host()
 
+class OpenCLBackend:
+
+    def __init__(self):
+
+        device = cl.get_platforms()[0].get_devices()[0]
+
+        self.backend_name = OPENCL_BACKEND_NAME
+        self.device_info = device.name
+
+    #Falta implementacion
 
 class CPUBackend:
     """Aplica operaciones de transformación de imágenes en CPU."""
+
+    def __init__(self):
+        self.backend_name = CPU_BACKEND_NAME
+        self.device_info = "CPU"
 
     def process(self, image: np.ndarray, operation: str) -> np.ndarray:
         """Aplica la operación indicada a la imagen.
@@ -165,11 +190,50 @@ class CPUBackend:
         return _OPERATIONS[operation](image)
 
 
+def _get_cuda_backend():
+    try:
+        if not cuda.is_available():
+            return None
+
+        backend = CUDABackend()
+        logging.info("Backend seleccionado: CUDA")
+        return backend
+
+    except Exception as exc:
+        logging.info("CUDA no disponible: %s", exc)
+        return None
+
+def _get_opencl_backend():
+    try:
+
+        if not cl.get_platforms():
+            return None
+
+        backend = OpenCLBackend()
+        logging.info("Backend seleccionado: OpenCL")
+        return backend
+
+    except Exception as exc:
+        logging.info("OpenCL no disponible: %s", exc)
+        return None
+
+def _get_cpu_backend():
+    backend = CPUBackend()
+    logging.info("Backend seleccionado: CPU")
+    return backend
+
 def get_backend() -> CPUBackend:
     """Devuelve el backend de procesamiento activo.
 
     Returns:
         Instancia de CPUBackend.
     """
-    # TODO: detección CUDA/OpenCL en futura iteración
-    return CPUBackend()
+    backend = _get_cuda_backend()
+    if backend:
+        return backend
+
+    backend = _get_opencl_backend()
+    if backend:
+        return backend
+
+    return _get_cpu_backend()
