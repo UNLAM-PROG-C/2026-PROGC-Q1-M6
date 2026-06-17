@@ -1,11 +1,8 @@
 import numpy as np
 import pytest
-
 from numba import cuda
 
 from core.backend import CUDABackend
-from unittest.mock import MagicMock
-from unittest.mock import patch
 
 cuda_available = pytest.mark.skipif(
     not cuda.is_available(),

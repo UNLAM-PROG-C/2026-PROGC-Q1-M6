@@ -56,8 +56,16 @@ def test_backend_name_accessible():
 
     assert hasattr(backend,"backend_name" )
 
-def test_device_info_accessible():
+@patch("core.backend.cl")
+def test_device_info_accessible(mock_cl):
+
+    fake_device = Mock()
+    fake_device.name = "Fake GPU"
+    mock_cl.get_platforms.return_value = [Mock()]
+    mock_cl.get_platforms.return_value[0].get_devices.return_value = [
+        fake_device
+    ]
 
     backend = OpenCLBackend()
 
-    assert hasattr(backend,"device_info")
+    assert hasattr(backend, "device_info")

@@ -73,7 +73,8 @@ def test_invalid_operation_raises(test_image):
 
     backend = CPUBackend()
 
-    with pytest.raises(ValueError):backend.process(test_image, "invalid")
+    with pytest.raises(ValueError):
+        backend.process(test_image, "invalid")
 
 
 def test_all_operations_complete(test_image):

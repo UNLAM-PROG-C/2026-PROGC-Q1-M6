@@ -1,7 +1,7 @@
 pillow
 opencv-python
 numpy
+numba
+pyopencl
 pylint
 pytest
-numba
-opencv-python
