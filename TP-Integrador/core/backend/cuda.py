@@ -29,13 +29,39 @@ if sys.platform == 'win32':
                     os.add_dll_directory(nvvm_bin_x64)
             try:
                 from numba.cuda import cuda_paths
+                from numba.cuda.cudadrv import libs
                 paths = cuda_paths.get_cuda_paths()
                 if os.path.isdir(bin_x64) and paths['cudalib_dir'].info != bin_x64:
                     paths['cudalib_dir'] = cuda_paths._env_path_tuple(
                         paths['cudalib_dir'].by, bin_x64
                     )
+                
+                import glob
+                # Patch for Numba missing CUDA 13+ support
+                _orig_get_cudalib = libs.get_cudalib
+                def _patched_get_cudalib(lib, static=False):
+                    if lib == 'cudart' and sys.platform == 'win32':
+                        libdir = paths['cudalib_dir'].info
+                        if libdir and os.path.isdir(libdir):
+                            dlls = glob.glob(os.path.join(libdir, 'cudart64_*.dll'))
+                            if dlls:
+                                return max(dlls)
+                    return _orig_get_cudalib(lib, static)
+                libs.get_cudalib = _patched_get_cudalib
+
+                from numba.cuda.cudadrv.nvvm import NVVM
+                _orig_supported_ccs = NVVM.supported_ccs
+                @property
+                def _patched_supported_ccs(self):
+                    ccs = _orig_supported_ccs.fget(self)
+                    if not ccs:
+                        return ((5, 0), (5, 2), (5, 3), (6, 0), (6, 1), (6, 2), 
+                                (7, 0), (7, 2), (7, 5), (8, 0), (8, 6), (8, 7), 
+                                (8, 9), (9, 0))
+                    return ccs
+                NVVM.supported_ccs = _patched_supported_ccs
+
                 if os.path.isdir(nvvm_bin_x64) and not paths['nvvm'].info:
-                    import glob
                     nvvm_dlls = glob.glob(os.path.join(nvvm_bin_x64, 'nvvm*.dll'))
                     if nvvm_dlls:
                         paths['nvvm'] = cuda_paths._env_path_tuple(
@@ -92,13 +118,13 @@ if _CUDA_AVAILABLE:
         if (EDGE_MARGIN <= x < image.shape[0] - EDGE_MARGIN and
                 EDGE_MARGIN <= y < image.shape[1] - EDGE_MARGIN):
             gx = (
-                -image[x-EDGE_MARGIN, y-EDGE_MARGIN] + image[x-EDGE_MARGIN, y+EDGE_MARGIN]
-                - SOBEL_WEIGHT*image[x, y-EDGE_MARGIN] + SOBEL_WEIGHT*image[x, y+EDGE_MARGIN]
-                - image[x+EDGE_MARGIN, y-EDGE_MARGIN] + image[x+EDGE_MARGIN, y+EDGE_MARGIN]
+                -int(image[x-EDGE_MARGIN, y-EDGE_MARGIN]) + int(image[x-EDGE_MARGIN, y+EDGE_MARGIN])
+                - SOBEL_WEIGHT*int(image[x, y-EDGE_MARGIN]) + SOBEL_WEIGHT*int(image[x, y+EDGE_MARGIN])
+                - int(image[x+EDGE_MARGIN, y-EDGE_MARGIN]) + int(image[x+EDGE_MARGIN, y+EDGE_MARGIN])
             )
             gy = (
-                -image[x-EDGE_MARGIN, y-EDGE_MARGIN] - SOBEL_WEIGHT*image[x-EDGE_MARGIN, y] - image[x-EDGE_MARGIN, y+EDGE_MARGIN]
-                + image[x+EDGE_MARGIN, y-EDGE_MARGIN] + SOBEL_WEIGHT*image[x+EDGE_MARGIN, y] + image[x+EDGE_MARGIN, y+EDGE_MARGIN]
+                -int(image[x-EDGE_MARGIN, y-EDGE_MARGIN]) - SOBEL_WEIGHT*int(image[x-EDGE_MARGIN, y]) - int(image[x-EDGE_MARGIN, y+EDGE_MARGIN])
+                + int(image[x+EDGE_MARGIN, y-EDGE_MARGIN]) + SOBEL_WEIGHT*int(image[x+EDGE_MARGIN, y]) + int(image[x+EDGE_MARGIN, y+EDGE_MARGIN])
             )
             magnitude = math.sqrt(gx*gx + gy*gy)
             output[x, y] = min(magnitude, MAX_PIXEL_VALUE)
@@ -115,9 +141,12 @@ class CUDABackend(GPUBackend):
     """Procesa imágenes en GPU NVIDIA mediante kernels CUDA (Numba)."""
 
     def __init__(self):
-        device = cuda.get_current_device()
         self.backend_name = CUDA_BACKEND_NAME
-        self.device_info = str(device)
+        try:
+            device = cuda.get_current_device()
+            self.device_info = str(device)
+        except AttributeError:
+            self.device_info = "CUDA Simulator"
 
     def process(self, image: np.ndarray, operation: str) -> np.ndarray:
         if operation not in _OPERATIONS_CUDA:
