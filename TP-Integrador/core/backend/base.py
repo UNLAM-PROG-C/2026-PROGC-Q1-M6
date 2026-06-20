@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import abc
-import numpy as np
 import threading
+
+import numpy as np
 
 VALID_OPERATIONS: tuple[str, ...] = (
     'grayscale',
@@ -24,6 +25,7 @@ OPENCL_BACKEND_NAME = "OpenCL"
 
 MAX_GPU_CONCURRENT_BATCHES: int = 2
 _gpu_semaphore = threading.Semaphore(MAX_GPU_CONCURRENT_BATCHES)
+
 
 class GPUBackend(abc.ABC):
     """Interfaz común de los backends de procesamiento (Strategy)."""
