@@ -5,3 +5,8 @@ numba
 pyopencl
 pylint
 pytest
+# Aceleracion GPU NVIDIA (CUDA 12): solo Linux/Windows x86_64; requiere driver
+# NVIDIA (nvidia-smi). En macOS/ARM se omiten y Numba cae a OpenCL/CPU en runtime.
+nvidia-cuda-runtime-cu12; platform_system != "Darwin" and platform_machine == "x86_64"
+nvidia-cuda-nvcc-cu12;    platform_system != "Darwin" and platform_machine == "x86_64"
+nvidia-cuda-nvrtc-cu12;   platform_system != "Darwin" and platform_machine == "x86_64"
