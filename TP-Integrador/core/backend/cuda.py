@@ -40,9 +40,8 @@ if _CUDA_AVAILABLE:
     def _grayscale_kernel(image, output):
         """Kernel CUDA de conversión a escala de grises."""
         x, y = cuda.grid(CUDA_GRID_DIM)  # pylint: disable=no-value-for-parameter
-        # pylint: disable-next=comparison-with-callable
-
-        if x < image.shape[0] and y < image.shape[1]:
+        rows, cols = image.shape[0], image.shape[1]
+        if x < rows and y < cols:  # pylint: disable=comparison-with-callable
             # Canal 0: Red, 1: Green, 2: Blue
             channel_r, channel_g, channel_b = 0, 1, 2
             r = image[x, y, channel_r]
@@ -57,19 +56,19 @@ if _CUDA_AVAILABLE:
     @cuda.jit
     def _edges_kernel(image, output):
         """Kernel CUDA de detección de bordes."""
-        # pylint: disable=no-value-for-parameter
         x, y = cuda.grid(CUDA_GRID_DIM)  # pylint: disable=no-value-for-parameter
+        rows, cols = image.shape[0], image.shape[1]
+        m, sw = EDGE_MARGIN, SOBEL_WEIGHT
         # pylint: disable-next=comparison-with-callable
-        if (EDGE_MARGIN <= x < image.shape[0] - EDGE_MARGIN and
-                EDGE_MARGIN <= y < image.shape[1] - EDGE_MARGIN):
+        if m <= x < rows - m and m <= y < cols - m:
             gx = (
-                -image[x-EDGE_MARGIN, y-EDGE_MARGIN] + image[x-EDGE_MARGIN, y+EDGE_MARGIN]
-                - SOBEL_WEIGHT*image[x, y-EDGE_MARGIN] + SOBEL_WEIGHT*image[x, y+EDGE_MARGIN]
-                - image[x+EDGE_MARGIN, y-EDGE_MARGIN] + image[x+EDGE_MARGIN, y+EDGE_MARGIN]
+                -image[x-m, y-m] + image[x-m, y+m]
+                - sw*image[x, y-m] + sw*image[x, y+m]
+                - image[x+m, y-m] + image[x+m, y+m]
             )
             gy = (
-                -image[x-EDGE_MARGIN, y-EDGE_MARGIN] - SOBEL_WEIGHT*image[x-EDGE_MARGIN, y] - image[x-EDGE_MARGIN, y+EDGE_MARGIN]
-                + image[x+EDGE_MARGIN, y-EDGE_MARGIN] + SOBEL_WEIGHT*image[x+EDGE_MARGIN, y] + image[x+EDGE_MARGIN, y+EDGE_MARGIN]
+                -image[x-m, y-m] - sw*image[x-m, y] - image[x-m, y+m]
+                + image[x+m, y-m] + sw*image[x+m, y] + image[x+m, y+m]
             )
             magnitude = math.sqrt(gx*gx + gy*gy)
             output[x, y] = min(magnitude, MAX_PIXEL_VALUE)
@@ -124,9 +123,9 @@ class CUDABackend(GPUBackend):
         d_output = cuda.to_device(
             np.zeros(image.shape[:2], dtype=np.uint8)
         )
-        
+
         blocks, threads = self._get_grid_dims(image.shape)
         _OPERATIONS_CUDA[operation][blocks, threads](d_image, d_output)
-        
+
         cuda.synchronize()
         return d_output.copy_to_host()
