@@ -12,6 +12,7 @@ from __future__ import annotations
 import abc
 import math
 import logging
+import threading
 import os
 import sys
 
@@ -78,6 +79,9 @@ MAX_PIXEL_VALUE: int = 255
 CPU_BACKEND_NAME = "CPU"
 CUDA_BACKEND_NAME = "CUDA"
 OPENCL_BACKEND_NAME = "OpenCL"
+
+MAX_GPU_CONCURRENT_BATCHES: int = 2
+_gpu_semaphore = threading.Semaphore(MAX_GPU_CONCURRENT_BATCHES)
 
 # CONSTANTES CUDA
 CUDA_THREADS_PER_BLOCK: int = 16
@@ -209,7 +213,11 @@ class CUDABackend(GPUBackend):
         """
         if operation not in _OPERATIONS_CUDA:
             raise ValueError(f'Unknown operation: {operation!r}')
-        # edges recibe RGB → se convierte a gris → Sobel CUDA.
+        with _gpu_semaphore:
+            return self._run_kernel(image, operation)
+
+    def _run_kernel(self, image: np.ndarray, operation: str) -> np.ndarray:
+        """Transfiere a device, ejecuta el kernel y trae el resultado."""
         if operation == "edges":
             image = _to_grayscale(image)
         # alloc en device + copia host→device.
@@ -245,7 +253,8 @@ class OpenCLBackend(GPUBackend):
         Raises:
             NotImplementedError: La implementación OpenCL es un esqueleto.
         """
-        raise NotImplementedError("OpenCL backend no implementado todavía")
+        with _gpu_semaphore:
+            raise NotImplementedError("OpenCL backend no implementado todavía")
 
 
 class CPUBackend(GPUBackend):
