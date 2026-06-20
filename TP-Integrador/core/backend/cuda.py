@@ -25,6 +25,10 @@ except ImportError:
 
 # CONSTANTES CUDA
 CUDA_THREADS_PER_BLOCK: int = 16
+CUDA_GRID_DIM: int = 2
+EDGE_MARGIN: int = 1
+SOBEL_WEIGHT: int = 2
+
 # Formula de conversion a grayscale:
 CUDA_GRAYSCALE_RED_WEIGHT: float = 0.299
 CUDA_GRAYSCALE_GREEN_WEIGHT: float = 0.587
@@ -34,13 +38,15 @@ if _CUDA_AVAILABLE:
 
     @cuda.jit
     def _grayscale_kernel(image, output):
-        """Kernel CUDA de conversión a escala de grises (un píxel por hilo)."""
-        x, y = cuda.grid(2)  # pylint: disable=no-value-for-parameter
-        # pylint: disable-next=comparison-with-callable
-        if x < image.shape[0] and y < image.shape[1]:
-            r = image[x, y, 0]
-            g = image[x, y, 1]
-            b = image[x, y, 2]
+        """Kernel CUDA de conversión a escala de grises."""
+        x, y = cuda.grid(CUDA_GRID_DIM)  # pylint: disable=no-value-for-parameter
+        rows, cols = image.shape[0], image.shape[1]
+        if x < rows and y < cols:  # pylint: disable=comparison-with-callable
+            # Canal 0: Red, 1: Green, 2: Blue
+            channel_r, channel_g, channel_b = 0, 1, 2
+            r = image[x, y, channel_r]
+            g = image[x, y, channel_g]
+            b = image[x, y, channel_b]
             output[x, y] = (
                 CUDA_GRAYSCALE_RED_WEIGHT * r
                 + CUDA_GRAYSCALE_GREEN_WEIGHT * g
@@ -49,22 +55,23 @@ if _CUDA_AVAILABLE:
 
     @cuda.jit
     def _edges_kernel(image, output):
-        """Kernel CUDA de detección de bordes (gradiente Sobel en device)."""
-        x, y = cuda.grid(2)  # pylint: disable=no-value-for-parameter
+        """Kernel CUDA de detección de bordes."""
+        x, y = cuda.grid(CUDA_GRID_DIM)  # pylint: disable=no-value-for-parameter
+        rows, cols = image.shape[0], image.shape[1]
+        m, sw = EDGE_MARGIN, SOBEL_WEIGHT
         # pylint: disable-next=comparison-with-callable
-        if 1 <= x < image.shape[0] - 1 and 1 <= y < image.shape[1] - 1:
+        if m <= x < rows - m and m <= y < cols - m:
             gx = (
-                -image[x-1, y-1] + image[x-1, y+1]
-                - 2*image[x, y-1] + 2*image[x, y+1]
-                - image[x+1, y-1] + image[x+1, y+1]
+                -image[x-m, y-m] + image[x-m, y+m]
+                - sw*image[x, y-m] + sw*image[x, y+m]
+                - image[x+m, y-m] + image[x+m, y+m]
             )
             gy = (
-                -image[x-1, y-1] - 2*image[x-1, y] - image[x-1, y+1]
-                + image[x+1, y-1] + 2*image[x+1, y] + image[x+1, y+1]
+                -image[x-m, y-m] - sw*image[x-m, y] - image[x-m, y+m]
+                + image[x+m, y-m] + sw*image[x+m, y] + image[x+m, y+m]
             )
             magnitude = math.sqrt(gx*gx + gy*gy)
-            magnitude = min(magnitude, MAX_PIXEL_VALUE)
-            output[x, y] = magnitude
+            output[x, y] = min(magnitude, MAX_PIXEL_VALUE)
 
     _OPERATIONS_CUDA = {
         'grayscale': _grayscale_kernel,
@@ -100,18 +107,25 @@ class CUDABackend(GPUBackend):
         with _gpu_semaphore:
             return self._run_kernel(image, operation)
 
+    def _get_grid_dims(self, shape: tuple) -> tuple[tuple, tuple]:
+        """Calcula las dimensiones del grid y los bloques para CUDA."""
+        threads = (CUDA_THREADS_PER_BLOCK, CUDA_THREADS_PER_BLOCK)
+        blocks = (
+            math.ceil(shape[0] / threads[0]),
+            math.ceil(shape[1] / threads[1]),
+        )
+        return blocks, threads
+
     def _run_kernel(self, image: np.ndarray, operation: str) -> np.ndarray:
         if operation == "edges":
             image = _to_grayscale(image)
         d_image = cuda.to_device(image)
         d_output = cuda.to_device(
-            np.zeros((image.shape[0], image.shape[1]), dtype=np.uint8)
+            np.zeros(image.shape[:2], dtype=np.uint8)
         )
-        threads = (CUDA_THREADS_PER_BLOCK, CUDA_THREADS_PER_BLOCK)
-        blocks = (
-            math.ceil(image.shape[0] / threads[0]),
-            math.ceil(image.shape[1] / threads[1]),
-        )
+
+        blocks, threads = self._get_grid_dims(image.shape)
         _OPERATIONS_CUDA[operation][blocks, threads](d_image, d_output)
+
         cuda.synchronize()
         return d_output.copy_to_host()
