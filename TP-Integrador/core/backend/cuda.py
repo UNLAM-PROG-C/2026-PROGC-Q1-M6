@@ -15,37 +15,6 @@ from core.backend.base import (
 )
 from core.backend.cpu import _to_grayscale
 
-# Parche para detectar CUDA Toolkit en Windows x64 (v12/v13) con Numba
-if sys.platform == 'win32':
-    try:
-        cuda_path = os.environ.get('CUDA_PATH') or os.environ.get('CUDA_HOME')
-        if cuda_path and os.path.isdir(cuda_path):
-            bin_x64 = os.path.join(cuda_path, 'bin', 'x64')
-            nvvm_bin_x64 = os.path.join(cuda_path, 'nvvm', 'bin', 'x64')
-            if hasattr(os, 'add_dll_directory'):
-                if os.path.isdir(bin_x64):
-                    os.add_dll_directory(bin_x64)
-                if os.path.isdir(nvvm_bin_x64):
-                    os.add_dll_directory(nvvm_bin_x64)
-            try:
-                from numba.cuda import cuda_paths
-                paths = cuda_paths.get_cuda_paths()
-                if os.path.isdir(bin_x64) and paths['cudalib_dir'].info != bin_x64:
-                    paths['cudalib_dir'] = cuda_paths._env_path_tuple(
-                        paths['cudalib_dir'].by, bin_x64
-                    )
-                if os.path.isdir(nvvm_bin_x64) and not paths['nvvm'].info:
-                    import glob
-                    nvvm_dlls = glob.glob(os.path.join(nvvm_bin_x64, 'nvvm*.dll'))
-                    if nvvm_dlls:
-                        paths['nvvm'] = cuda_paths._env_path_tuple(
-                            paths['nvvm'].by, nvvm_dlls[0]
-                        )
-            except Exception:
-                pass
-    except Exception:
-        pass
-
 try:
     from numba import cuda
     _CUDA_AVAILABLE = True
@@ -66,7 +35,8 @@ if _CUDA_AVAILABLE:
     @cuda.jit
     def _grayscale_kernel(image, output):
         """Kernel CUDA de conversión a escala de grises (un píxel por hilo)."""
-        x, y = cuda.grid(2)
+        x, y = cuda.grid(2)  # pylint: disable=no-value-for-parameter
+        # pylint: disable-next=comparison-with-callable
         if x < image.shape[0] and y < image.shape[1]:
             r = image[x, y, 0]
             g = image[x, y, 1]
@@ -80,7 +50,8 @@ if _CUDA_AVAILABLE:
     @cuda.jit
     def _edges_kernel(image, output):
         """Kernel CUDA de detección de bordes (gradiente Sobel en device)."""
-        x, y = cuda.grid(2)
+        x, y = cuda.grid(2)  # pylint: disable=no-value-for-parameter
+        # pylint: disable-next=comparison-with-callable
         if 1 <= x < image.shape[0] - 1 and 1 <= y < image.shape[1] - 1:
             gx = (
                 -image[x-1, y-1] + image[x-1, y+1]
@@ -92,8 +63,7 @@ if _CUDA_AVAILABLE:
                 + image[x+1, y-1] + 2*image[x+1, y] + image[x+1, y+1]
             )
             magnitude = math.sqrt(gx*gx + gy*gy)
-            if magnitude > MAX_PIXEL_VALUE:
-                magnitude = MAX_PIXEL_VALUE
+            magnitude = min(magnitude, MAX_PIXEL_VALUE)
             output[x, y] = magnitude
 
     _OPERATIONS_CUDA = {
@@ -113,6 +83,18 @@ class CUDABackend(GPUBackend):
         self.device_info = str(device)
 
     def process(self, image: np.ndarray, operation: str) -> np.ndarray:
+        """Aplica la operación a la imagen usando un kernel CUDA.
+
+        Args:
+            image: Array NumPy con shape (H, W, C), dtype uint8.
+            operation: Transformación a aplicar. Valores: VALID_OPERATIONS.
+
+        Returns:
+            Array procesado con shape (H, W), dtype uint8.
+
+        Raises:
+            ValueError: Si operation no está en _OPERATIONS_CUDA.
+        """
         if operation not in _OPERATIONS_CUDA:
             raise ValueError(f'Unknown operation: {operation!r}')
         with _gpu_semaphore:

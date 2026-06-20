@@ -6,6 +6,8 @@ from core.backend.base import (
     CPU_BACKEND_NAME,
     CUDA_BACKEND_NAME,
     OPENCL_BACKEND_NAME,
+    MAX_GPU_CONCURRENT_BATCHES,
+    _gpu_semaphore,
 )
 from core.backend.cpu import CPUBackend
 from core.backend.cuda import CUDABackend
@@ -22,4 +24,6 @@ __all__ = [
     "CPU_BACKEND_NAME",
     "CUDA_BACKEND_NAME",
     "OPENCL_BACKEND_NAME",
+    "MAX_GPU_CONCURRENT_BATCHES",
+    "_gpu_semaphore",
 ]
