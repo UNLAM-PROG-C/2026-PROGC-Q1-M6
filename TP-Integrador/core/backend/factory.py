@@ -10,6 +10,7 @@ from core.backend.cuda import CUDABackend, _CUDA_AVAILABLE, cuda
 from core.backend.opencl import OpenCLBackend, _OPENCL_AVAILABLE, cl
 
 def _get_cuda_backend() -> CUDABackend | None:
+    """Intenta construir un CUDABackend; devuelve None si no hay CUDA."""
     if not _CUDA_AVAILABLE:
         return None
     try:
@@ -22,7 +23,9 @@ def _get_cuda_backend() -> CUDABackend | None:
         logging.info("CUDA no disponible: %s", exc)
         return None
 
+
 def _get_opencl_backend() -> OpenCLBackend | None:
+    """Intenta construir un OpenCLBackend; devuelve None si no hay OpenCL."""
     if not _OPENCL_AVAILABLE:
         return None
     try:
@@ -35,7 +38,9 @@ def _get_opencl_backend() -> OpenCLBackend | None:
         logging.info("OpenCL no disponible: %s", exc)
         return None
 
+
 def _get_cpu_backend() -> CPUBackend:
+    """Construye y devuelve un CPUBackend."""
     backend = CPUBackend()
     logging.info("Backend seleccionado: CPU")
     return backend

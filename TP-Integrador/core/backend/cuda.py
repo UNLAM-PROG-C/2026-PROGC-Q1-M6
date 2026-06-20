@@ -15,63 +15,6 @@ from core.backend.base import (
 )
 from core.backend.cpu import _to_grayscale
 
-# pylint: disable=broad-exception-caught, protected-access
-if sys.platform == 'win32':
-    try:
-        cuda_path = os.environ.get('CUDA_PATH') or os.environ.get('CUDA_HOME')
-        if cuda_path and os.path.isdir(cuda_path):
-            bin_x64 = os.path.join(cuda_path, 'bin', 'x64')
-            nvvm_bin_x64 = os.path.join(cuda_path, 'nvvm', 'bin', 'x64')
-            if hasattr(os, 'add_dll_directory'):
-                if os.path.isdir(bin_x64):
-                    os.add_dll_directory(bin_x64)
-                if os.path.isdir(nvvm_bin_x64):
-                    os.add_dll_directory(nvvm_bin_x64)
-            try:
-                from numba.cuda import cuda_paths
-                from numba.cuda.cudadrv import libs
-                paths = cuda_paths.get_cuda_paths()
-                if os.path.isdir(bin_x64) and paths['cudalib_dir'].info != bin_x64:
-                    paths['cudalib_dir'] = cuda_paths._env_path_tuple(
-                        paths['cudalib_dir'].by, bin_x64
-                    )
-                
-                import glob
-                # Patch for Numba missing CUDA 13+ support
-                _orig_get_cudalib = libs.get_cudalib
-                def _patched_get_cudalib(lib, static=False):
-                    if lib == 'cudart' and sys.platform == 'win32':
-                        libdir = paths['cudalib_dir'].info
-                        if libdir and os.path.isdir(libdir):
-                            dlls = glob.glob(os.path.join(libdir, 'cudart64_*.dll'))
-                            if dlls:
-                                return max(dlls)
-                    return _orig_get_cudalib(lib, static)
-                libs.get_cudalib = _patched_get_cudalib
-
-                from numba.cuda.cudadrv.nvvm import NVVM
-                _orig_supported_ccs = NVVM.supported_ccs
-                @property
-                def _patched_supported_ccs(self):
-                    ccs = _orig_supported_ccs.fget(self)
-                    if not ccs:
-                        return ((5, 0), (5, 2), (5, 3), (6, 0), (6, 1), (6, 2), 
-                                (7, 0), (7, 2), (7, 5), (8, 0), (8, 6), (8, 7), 
-                                (8, 9), (9, 0))
-                    return ccs
-                NVVM.supported_ccs = _patched_supported_ccs
-
-                if os.path.isdir(nvvm_bin_x64) and not paths['nvvm'].info:
-                    nvvm_dlls = glob.glob(os.path.join(nvvm_bin_x64, 'nvvm*.dll'))
-                    if nvvm_dlls:
-                        paths['nvvm'] = cuda_paths._env_path_tuple(
-                            paths['nvvm'].by, nvvm_dlls[0]
-                        )
-            except Exception:
-                pass
-    except Exception:
-        pass
-
 try:
     from numba import cuda
     _CUDA_AVAILABLE = True
@@ -96,9 +39,9 @@ if _CUDA_AVAILABLE:
     @cuda.jit
     def _grayscale_kernel(image, output):
         """Kernel CUDA de conversión a escala de grises."""
-        # pylint: disable=no-value-for-parameter
-        x, y = cuda.grid(CUDA_GRID_DIM)
-        if x < image.shape[0] and y < image.shape[1]:
+        x, y = cuda.grid(CUDA_GRID_DIM)  # pylint: disable=no-value-for-parameter
+        rows, cols = image.shape[0], image.shape[1]
+        if x < rows and y < cols:  # pylint: disable=comparison-with-callable
             # Canal 0: Red, 1: Green, 2: Blue
             channel_r, channel_g, channel_b = 0, 1, 2
             r = image[x, y, channel_r]
@@ -113,18 +56,19 @@ if _CUDA_AVAILABLE:
     @cuda.jit
     def _edges_kernel(image, output):
         """Kernel CUDA de detección de bordes."""
-        # pylint: disable=no-value-for-parameter
-        x, y = cuda.grid(CUDA_GRID_DIM)
-        if (EDGE_MARGIN <= x < image.shape[0] - EDGE_MARGIN and
-                EDGE_MARGIN <= y < image.shape[1] - EDGE_MARGIN):
+        x, y = cuda.grid(CUDA_GRID_DIM)  # pylint: disable=no-value-for-parameter
+        rows, cols = image.shape[0], image.shape[1]
+        m, sw = EDGE_MARGIN, SOBEL_WEIGHT
+        # pylint: disable-next=comparison-with-callable
+        if m <= x < rows - m and m <= y < cols - m:
             gx = (
-                -int(image[x-EDGE_MARGIN, y-EDGE_MARGIN]) + int(image[x-EDGE_MARGIN, y+EDGE_MARGIN])
-                - SOBEL_WEIGHT*int(image[x, y-EDGE_MARGIN]) + SOBEL_WEIGHT*int(image[x, y+EDGE_MARGIN])
-                - int(image[x+EDGE_MARGIN, y-EDGE_MARGIN]) + int(image[x+EDGE_MARGIN, y+EDGE_MARGIN])
+                -int(image[x-m, y-m]) + int(image[x-m, y+m])
+                - sw*int(image[x, y-m]) + sw*int(image[x, y+m])
+                - int(image[x+m, y-m]) + int(image[x+m, y+m])
             )
             gy = (
-                -int(image[x-EDGE_MARGIN, y-EDGE_MARGIN]) - SOBEL_WEIGHT*int(image[x-EDGE_MARGIN, y]) - int(image[x-EDGE_MARGIN, y+EDGE_MARGIN])
-                + int(image[x+EDGE_MARGIN, y-EDGE_MARGIN]) + SOBEL_WEIGHT*int(image[x+EDGE_MARGIN, y]) + int(image[x+EDGE_MARGIN, y+EDGE_MARGIN])
+                -int(image[x-m, y-m]) - sw*int(image[x-m, y]) - int(image[x-m, y+m])
+                + int(image[x+m, y-m]) + sw*int(image[x+m, y]) + int(image[x+m, y+m])
             )
             magnitude = math.sqrt(gx*gx + gy*gy)
             output[x, y] = min(magnitude, MAX_PIXEL_VALUE)
@@ -149,6 +93,18 @@ class CUDABackend(GPUBackend):
             self.device_info = "CUDA Simulator"
 
     def process(self, image: np.ndarray, operation: str) -> np.ndarray:
+        """Aplica la operación a la imagen usando un kernel CUDA.
+
+        Args:
+            image: Array NumPy con shape (H, W, C), dtype uint8.
+            operation: Transformación a aplicar. Valores: VALID_OPERATIONS.
+
+        Returns:
+            Array procesado con shape (H, W), dtype uint8.
+
+        Raises:
+            ValueError: Si operation no está en _OPERATIONS_CUDA.
+        """
         if operation not in _OPERATIONS_CUDA:
             raise ValueError(f'Unknown operation: {operation!r}')
         with _gpu_semaphore:
@@ -170,9 +126,9 @@ class CUDABackend(GPUBackend):
         d_output = cuda.to_device(
             np.zeros(image.shape[:2], dtype=np.uint8)
         )
-        
+
         blocks, threads = self._get_grid_dims(image.shape)
         _OPERATIONS_CUDA[operation][blocks, threads](d_image, d_output)
-        
+
         cuda.synchronize()
         return d_output.copy_to_host()
