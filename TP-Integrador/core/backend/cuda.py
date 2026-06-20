@@ -62,13 +62,14 @@ if _CUDA_AVAILABLE:
         # pylint: disable-next=comparison-with-callable
         if m <= x < rows - m and m <= y < cols - m:
             gx = (
-                -image[x-m, y-m] + image[x-m, y+m]
-                - sw*image[x, y-m] + sw*image[x, y+m]
-                - image[x+m, y-m] + image[x+m, y+m]
+                -int(image[x-m, y-m]) + int(image[x-m, y+m])
+                - sw*int(image[x, y-m]) + sw*int(image[x, y+m])
+                - int(image[x+m, y-m]) + int(image[x+m, y+m])
             )
             gy = (
-                -image[x-m, y-m] - sw*image[x-m, y] - image[x-m, y+m]
-                + image[x+m, y-m] + sw*image[x+m, y] + image[x+m, y+m]
+                -int(image[x-m, y-m]) - sw*int(image[x-m, y])
+                - int(image[x-m, y+m]) + int(image[x+m, y-m])
+                + sw*int(image[x+m, y]) + int(image[x+m, y+m])
             )
             magnitude = math.sqrt(gx*gx + gy*gy)
             output[x, y] = min(magnitude, MAX_PIXEL_VALUE)
@@ -85,9 +86,12 @@ class CUDABackend(GPUBackend):
     """Procesa imágenes en GPU NVIDIA mediante kernels CUDA (Numba)."""
 
     def __init__(self):
-        device = cuda.get_current_device()
         self.backend_name = CUDA_BACKEND_NAME
-        self.device_info = str(device)
+        try:
+            device = cuda.get_current_device()
+            self.device_info = str(device)
+        except AttributeError:
+            self.device_info = "CUDA Simulator"
 
     def process(self, image: np.ndarray, operation: str) -> np.ndarray:
         """Aplica la operación a la imagen usando un kernel CUDA.
