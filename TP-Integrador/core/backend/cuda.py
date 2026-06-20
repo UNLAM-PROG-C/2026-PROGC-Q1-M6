@@ -67,8 +67,9 @@ if _CUDA_AVAILABLE:
                 - int(image[x+m, y-m]) + int(image[x+m, y+m])
             )
             gy = (
-                -int(image[x-m, y-m]) - sw*int(image[x-m, y]) - int(image[x-m, y+m])
-                + int(image[x+m, y-m]) + sw*int(image[x+m, y]) + int(image[x+m, y+m])
+                -int(image[x-m, y-m]) - sw*int(image[x-m, y])
+                - int(image[x-m, y+m]) + int(image[x+m, y-m])
+                + sw*int(image[x+m, y]) + int(image[x+m, y+m])
             )
             magnitude = math.sqrt(gx*gx + gy*gy)
             output[x, y] = min(magnitude, MAX_PIXEL_VALUE)

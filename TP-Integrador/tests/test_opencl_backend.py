@@ -76,12 +76,15 @@ def test_opencl_process_invalid_operation():
         with pytest.raises(NotImplementedError):
             backend.process(np.zeros((10, 10, 3), dtype=np.uint8), "blur")
     else:
-        with patch('core.backend.opencl.cl.get_platforms') as mock_platforms:
+        with patch('core.backend.opencl.cl.get_platforms') as mock_platforms, \
+             patch('core.backend.opencl.cl.Context'), \
+             patch('core.backend.opencl.cl.CommandQueue'), \
+             patch('core.backend.opencl.cl.Program'):
             mock_device = MagicMock()
             mock_platform = MagicMock()
             mock_platform.get_devices.return_value = [mock_device]
             mock_platforms.return_value = [mock_platform]
-            
+
             backend = OpenCLBackend()
             with pytest.raises(NotImplementedError):
                 backend.process(np.zeros((10, 10, 3), dtype=np.uint8), "blur")
