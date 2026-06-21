@@ -15,6 +15,38 @@ from core.backend.base import (
 )
 from core.backend.cpu import _to_grayscale
 
+# Parche para detectar CUDA Toolkit en Windows x64 (v12/v13) con Numba
+if sys.platform == 'win32':
+    try:
+        cuda_path = os.environ.get('CUDA_PATH') or os.environ.get('CUDA_HOME')
+        if cuda_path and os.path.isdir(cuda_path):
+            bin_x64 = os.path.join(cuda_path, 'bin', 'x64')
+            nvvm_bin_x64 = os.path.join(cuda_path, 'nvvm', 'bin', 'x64')
+            if hasattr(os, 'add_dll_directory'):
+                if os.path.isdir(bin_x64):
+                    os.add_dll_directory(bin_x64)
+                if os.path.isdir(nvvm_bin_x64):
+                    os.add_dll_directory(nvvm_bin_x64)
+            try:
+                from numba.cuda import cuda_paths
+                paths = cuda_paths.get_cuda_paths()
+                if os.path.isdir(bin_x64) and paths['cudalib_dir'].info != bin_x64:
+                    paths['cudalib_dir'] = cuda_paths._env_path_tuple(
+                        paths['cudalib_dir'].by, bin_x64
+                    )
+                if os.path.isdir(nvvm_bin_x64) and not paths['nvvm'].info:
+                    import glob
+                    nvvm_dlls = glob.glob(os.path.join(nvvm_bin_x64, 'nvvm*.dll'))
+                    if nvvm_dlls:
+                        paths['nvvm'] = cuda_paths._env_path_tuple(
+                            paths['nvvm'].by, nvvm_dlls[0]
+                        )
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 try:
     from numba import cuda
     _CUDA_AVAILABLE = True
