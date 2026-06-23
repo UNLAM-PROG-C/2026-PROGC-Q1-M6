@@ -5,3 +5,5 @@ numba
 pyopencl
 pylint
 pytest
+fastapi
+uvicorn[standard]
