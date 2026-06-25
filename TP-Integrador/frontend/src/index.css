@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --primary: 256 90% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+    --accent: 256 90% 96%;
+    --accent-foreground: 256 90% 40%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 256 90% 60%;
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 224 39% 6%;
+    --foreground: 213 31% 91%;
+    --card: 224 33% 9%;
+    --card-foreground: 213 31% 91%;
+    --primary: 256 92% 67%;
+    --primary-foreground: 224 39% 6%;
+    --secondary: 223 24% 16%;
+    --secondary-foreground: 213 31% 91%;
+    --muted: 223 24% 14%;
+    --muted-foreground: 217 15% 60%;
+    --accent: 256 40% 20%;
+    --accent-foreground: 256 92% 85%;
+    --destructive: 0 63% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 223 24% 18%;
+    --input: 223 24% 18%;
+    --ring: 256 92% 67%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+    background-image:
+      radial-gradient(
+        60rem 60rem at 110% -10%,
+        hsl(256 92% 67% / 0.1),
+        transparent 60%
+      ),
+      radial-gradient(
+        50rem 50rem at -10% 10%,
+        hsl(190 90% 50% / 0.06),
+        transparent 55%
+      );
+    background-attachment: fixed;
+  }
+}
+
+@layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
