@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import threading
+from unittest.mock import patch
 
 from core.metrics import (
     CPU_BACKEND,
     GPU_BACKEND,
     NO_SPEEDUP,
+    ZERO_ELAPSED,
     ZERO_THROUGHPUT,
     MetricsCollector,
 )
@@ -29,6 +31,16 @@ THREAD_COUNT: int = 10
 RECORDS_PER_THREAD: int = 100
 TOTAL_RECORDS: int = 1000
 READ_ATTEMPTS: int = 50
+MOCK_STAMP_0: float = 0.0
+MOCK_STAMP_1: float = 0.5
+MOCK_STAMP_2: float = 1.0
+MOCK_ELAPSED_T: float = 2.0
+RECORD_COUNT_3: int = 3
+EXPECTED_LIVE_RATE: float = 2.0  # (3-1) / (1.0-0.0)
+LIVE_STATS_KEYS: frozenset = frozenset({
+    'processed_count', 'total_count', 'imgs_per_sec',
+    'eta_seconds', 'speedup_factor', 'elapsed_seconds',
+})
 
 
 def test_record_single_entry() -> None:
@@ -123,3 +135,44 @@ def test_get_summary_during_recording() -> None:
     for thread in threads:
         thread.join()
     assert len(collector.get_records()) == TOTAL_RECORDS
+
+
+def test_live_stats_imgs_per_sec() -> None:
+    """imgs_per_sec refleja el rate real de la ventana de timestamps."""
+    collector = MetricsCollector()
+    mock_times = [MOCK_STAMP_0, MOCK_STAMP_1, MOCK_STAMP_2, MOCK_ELAPSED_T]
+    with patch('core.metrics.time.monotonic', side_effect=mock_times):
+        for _ in range(RECORD_COUNT_3):
+            collector.record(IMAGE_NAME, CPU_BACKEND, OPERATION, SINGLE_ELAPSED_MS)
+        stats = collector.get_live_stats()
+    assert stats['imgs_per_sec'] == EXPECTED_LIVE_RATE
+
+
+def test_live_stats_eta_no_division_by_zero() -> None:
+    """Con rate 0 (1 registro), eta_seconds es 0.0 sin lanzar excepción."""
+    collector = MetricsCollector()
+    collector.record(IMAGE_NAME, CPU_BACKEND, OPERATION, SINGLE_ELAPSED_MS)
+    stats = collector.get_live_stats()
+    assert stats['eta_seconds'] == ZERO_ELAPSED
+
+
+def test_live_stats_coherent_during_recording() -> None:
+    """get_live_stats() durante la grabación devuelve dict con 6 claves."""
+    collector = MetricsCollector()
+    barrier = threading.Barrier(THREAD_COUNT)
+    threads = _build_threads(collector, barrier)
+    for thread in threads:
+        thread.start()
+    for _ in range(READ_ATTEMPTS):
+        assert frozenset(collector.get_live_stats().keys()) == LIVE_STATS_KEYS
+    for thread in threads:
+        thread.join()
+
+
+def test_live_stats_speedup_matches_get_speedup() -> None:
+    """speedup_factor en get_live_stats() coincide con get_speedup()."""
+    collector = MetricsCollector()
+    collector.record(IMAGE_NAME, CPU_BACKEND, OPERATION, CPU_ELAPSED_MS)
+    collector.record(IMAGE_NAME, GPU_BACKEND, OPERATION, GPU_ELAPSED_MS)
+    stats = collector.get_live_stats()
+    assert stats['speedup_factor'] == collector.get_speedup()
