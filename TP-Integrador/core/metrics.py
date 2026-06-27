@@ -9,6 +9,7 @@ ZERO_THROUGHPUT: float = 0.0
 NO_SPEEDUP: float = 0.0
 CPU_BACKEND: str = 'cpu'
 GPU_BACKEND: str = 'gpu'
+CPU_FALLBACK_BACKEND: str = 'cpu-fallback'
 
 
 class Record(NamedTuple):
