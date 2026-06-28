@@ -14,6 +14,7 @@ __pycache__/
 
 # Carpetas de imagenes de prueba
 sample_images/
+result/
 
 # Frontend (Node)
 frontend/node_modules/
