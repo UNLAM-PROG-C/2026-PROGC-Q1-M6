@@ -2,9 +2,13 @@ import { Boxes } from "lucide-react";
 import { BackendIndicator } from "@/components/BackendIndicator";
 import { ConfigPanel } from "@/components/ConfigPanel";
 import { ProgressPanel } from "@/components/ProgressPanel";
+import { ResultsGallery } from "@/components/ResultsGallery";
+import { useStartConfig } from "@/hooks/useStartConfig";
 
 /** Layout principal del dashboard: header + dos columnas (#20, #21). */
 export default function App() {
+  const config = useStartConfig();
+
   return (
     <div className="min-h-screen">
       <header className="border-b border-border/70 bg-card/30 backdrop-blur-md">
@@ -28,9 +32,15 @@ export default function App() {
 
       <main className="container max-w-6xl py-8">
         <div className="grid gap-6 lg:grid-cols-2">
-          <ConfigPanel />
+          <ConfigPanel config={config} />
           <ProgressPanel />
         </div>
+        
+        <ResultsGallery 
+          inputDir={config.inputDir} 
+          outputDir={config.outputDir} 
+        />
+        
         <footer className="mt-10 text-center text-xs text-muted-foreground">
           ParallelVision · UNLaM Programación Concurrente · Capa 5 (Dashboard)
         </footer>

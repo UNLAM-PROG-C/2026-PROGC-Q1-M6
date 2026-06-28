@@ -10,6 +10,7 @@ import argparse
 import logging
 import os
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
 from core.backend import VALID_OPERATIONS, CPUBackend, get_backend
@@ -66,11 +67,14 @@ def _process_images(
 
 def _run_pipeline(
     args: argparse.Namespace,
+    *,
+    on_record: Callable[[int, int], None] | None = None,
 ) -> tuple[MetricsCollector, float, CPUBackend]:
     """Ejecuta el pipeline completo y devuelve sus métricas.
 
     Args:
         args: Argumentos de configuración del pipeline.
+        on_record: Callback opcional invocado tras cada imagen procesada.
 
     Returns:
         Tupla con el colector, el tiempo total en segundos y el
@@ -90,7 +94,7 @@ def _run_pipeline(
         image_saver.start()
 
     paths = scan_folder(args.input_dir)
-    aggregator = ResultAggregator(result_queue, metrics)
+    aggregator = ResultAggregator(result_queue, metrics, len(paths), on_record)
     aggregator.start()
     start = time.perf_counter()
     _process_images(args, backend, input_queue, result_queue, paths, io_queue)

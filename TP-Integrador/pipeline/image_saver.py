@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import os
 import threading
@@ -27,6 +28,7 @@ class ImageSaver(threading.Thread):
         super().__init__(name='image-saver')
         self._io_queue = io_queue
         self._output_dir = output_dir
+        self._manifest: list[dict[str, str]] = []
 
     def run(self) -> None:
         """Consume imágenes de la cola y las guarda en disco."""
@@ -42,6 +44,7 @@ class ImageSaver(threading.Thread):
                 _LOGGER.error('Error guardando imagen %s: %s', name, e)
             finally:
                 self._io_queue.task_done()
+        self._save_manifest()
         _LOGGER.info('Hilo de I/O finalizado')
 
     def _save_image(self, name: str, operation: str, image: "np.ndarray") -> None:
@@ -54,6 +57,36 @@ class ImageSaver(threading.Thread):
         new_name = f"{base_name}_{operation}_{now}{ext}"
         out_path = os.path.join(self._output_dir, new_name)
         
-        success = cv2.imwrite(out_path, image)
-        if not success:
-            _LOGGER.error('Fallo cv2.imwrite al escribir: %s', out_path)
+        import numpy as np
+        try:
+            is_success, im_buf_arr = cv2.imencode(ext, image)
+            if is_success:
+                im_buf_arr.tofile(out_path)
+                success = True
+            else:
+                success = False
+        except Exception:
+            success = False
+
+        if success:
+            self._manifest.append({
+                "original_filename": name,
+                "transformed_filename": new_name,
+                "operation": operation
+            })
+        else:
+            _LOGGER.error('Fallo cv2.imencode/tofile al escribir: %s', out_path)
+
+    def _save_manifest(self) -> None:
+        """Guarda el archivo manifest.json con las imágenes procesadas."""
+        if not self._manifest:
+            return
+        manifest_path = os.path.join(self._output_dir, 'manifest.json')
+        try:
+            # Si ya existe, podríamos querer añadir o sobrescribir. 
+            # Por ahora sobrescribimos por cada ejecución del pipeline.
+            with open(manifest_path, 'w', encoding='utf-8') as f:
+                json.dump({"results": self._manifest}, f, indent=2)
+            _LOGGER.info('Manifest JSON guardado en %s', manifest_path)
+        except Exception as e:
+            _LOGGER.error('Error guardando manifest.json: %s', e)

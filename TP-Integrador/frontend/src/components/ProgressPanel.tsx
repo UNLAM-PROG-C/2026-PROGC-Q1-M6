@@ -49,25 +49,32 @@ export function ProgressPanel() {
           <MetricStat
             icon={Gauge}
             label="Velocidad"
-            value={PLACEHOLDER}
+            value={progress.speed > 0 ? progress.speed.toFixed(1) : PLACEHOLDER}
             hint="img/s · Fase 3"
           />
           <MetricStat
             icon={Clock}
             label="Transcurrido"
-            value={PLACEHOLDER}
+            value={progress.elapsed > 0 ? formatTime(progress.elapsed) : PLACEHOLDER}
             hint="mm:ss · Fase 3"
           />
           <MetricStat
             icon={Hourglass}
             label="ETA"
-            value={PLACEHOLDER}
+            value={progress.running && progress.eta > 0 ? formatTime(progress.eta) : PLACEHOLDER}
             hint="estimado · Fase 3"
           />
         </div>
       </CardContent>
     </Card>
   );
+}
+
+function formatTime(seconds: number): string {
+  if (!seconds || isNaN(seconds)) return "00:00";
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
 function ConnectionDot({ connected }: { connected: boolean }) {

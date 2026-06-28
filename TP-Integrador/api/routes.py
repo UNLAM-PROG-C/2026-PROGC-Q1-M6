@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import functools
+import json
 import logging
+import threading
 from pathlib import Path
+from types import SimpleNamespace
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi.responses import FileResponse
 
-from core.backend import CPU_BACKEND_NAME, VALID_OPERATIONS, get_backend
-from core.backend.base import GPUBackend
+from api.progress_hub import hub
 from api.schemas import (
     BackendInfo,
     BrowseResult,
@@ -18,6 +21,27 @@ from api.schemas import (
     StartConfig,
     StartResponse,
 )
+from core.backend import CPU_BACKEND_NAME, VALID_OPERATIONS, get_backend
+from core.backend.base import GPUBackend
+from pipeline.image_loader import scan_folder
+
+_RUN_LOCK: threading.Lock = threading.Lock()
+_RUN_STATE: dict[str, bool] = {'running': False}
+
+
+def _acquire_run() -> bool:
+    """Marca pipeline en ejecución; devuelve False si ya está corriendo."""
+    with _RUN_LOCK:
+        if _RUN_STATE['running']:
+            return False
+        _RUN_STATE['running'] = True
+        return True
+
+
+def _release_run() -> None:
+    """Libera el guard de concurrencia del pipeline."""
+    with _RUN_LOCK:
+        _RUN_STATE['running'] = False
 
 OPERATION_LABELS: dict[str, str] = {
     'grayscale': 'Escala de grises',
@@ -108,20 +132,110 @@ def browse(path: str = Query(default='')) -> BrowseResult:
         path=str(target), parent=parent, entries=_list_subdirs(target))
 
 
+_QUEUE_SIZE: int = 10
+
+
+def _validate_start(config: StartConfig) -> None:
+    """Valida la configuración antes de iniciar el pipeline.
+
+    Raises:
+        HTTPException: 400 si el directorio no existe, la operación es
+            inválida, o no hay imágenes en el directorio.
+    """
+    if not Path(config.input_dir).is_dir():
+        raise HTTPException(status_code=400, detail='Directorio no encontrado.')
+    if config.operation not in VALID_OPERATIONS:
+        raise HTTPException(status_code=400, detail='Operación inválida.')
+    if not scan_folder(config.input_dir):
+        raise HTTPException(status_code=400, detail='Sin imágenes en el directorio.')
+
+
+def _run_pipeline_task(config: StartConfig) -> None:
+    """Ejecuta el pipeline en un hilo de fondo simulando los argumentos del CLI."""
+    from main import _run_pipeline
+
+    args = SimpleNamespace(
+        input_dir=config.input_dir,
+        output_dir=config.output_dir,
+        operation=config.operation,
+        workers=config.workers,
+        queue_size=_QUEUE_SIZE,
+        no_save=False,
+    )
+
+    hub.set_running(True)
+    try:
+        _metrics, total_seconds, _ = _run_pipeline(
+            args, on_record=hub.update_progress)
+        logging.info('Pipeline finalizado exitosamente en %.2fs', total_seconds)
+    except Exception as e:
+        logging.error('Error en pipeline: %s', e)
+    finally:
+        hub.set_running(False)
+        _release_run()
+
+
 @router.post('/start', status_code=202)
-def start(config: StartConfig) -> StartResponse:
-    """Valida la configuración y acusa recibo (stub de Fase 2).
+def start(config: StartConfig, background_tasks: BackgroundTasks) -> StartResponse:
+    """Inicia el procesamiento delegando a un background task.
 
     Args:
-        config: Carpetas, operaciones e hilos elegidos en la SPA.
+        config: Configuración elegida en la SPA.
+        background_tasks: Inyector de tareas en segundo plano de FastAPI.
 
     Returns:
-        StartResponse confirmando la recepción de la configuración.
+        StartResponse confirmando la recepción.
     """
     logging.info(
-        'Solicitud de inicio: %s -> %s, ops=%s, workers=%d',
+        'Solicitud de inicio: %s -> %s, op=%s, workers=%d',
         config.input_dir, config.output_dir,
-        config.operations, config.workers)
+        config.operation, config.workers)
+
+    _validate_start(config)
+    if not _acquire_run():
+        raise HTTPException(status_code=409, detail='Pipeline ya en ejecución.')
+
+    background_tasks.add_task(_run_pipeline_task, config)
+    
     return StartResponse(
         accepted=True,
-        message='Configuración recibida (ejecución real en Fase 3).')
+        message='Procesamiento iniciado.')
+
+
+@router.get('/results')
+def get_results(output_dir: str = Query(...)) -> dict:
+    """Lee el manifest.json de la carpeta de salida y devuelve los resultados."""
+    target_dir = _safe_resolve(output_dir)
+    if not target_dir.exists() or not target_dir.is_dir():
+        raise HTTPException(status_code=400, detail="Directorio de salida inválido.")
+    
+    manifest_path = target_dir / "manifest.json"
+    if not manifest_path.exists():
+        return {"results": []}
+        
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logging.error("Error leyendo manifest.json: %s", e)
+        raise HTTPException(status_code=500, detail="Error leyendo el manifiesto.")
+
+
+@router.get('/image')
+def get_image(dir_path: str = Query(...), filename: str = Query(...)) -> FileResponse:
+    """Sirve una imagen estática de forma segura."""
+    target_dir = _safe_resolve(dir_path)
+    if not target_dir.exists() or not target_dir.is_dir():
+        raise HTTPException(status_code=400, detail="Directorio inválido.")
+        
+    file_path = target_dir / filename
+    
+    # Prevenir Path Traversal validando que resolve() siga dentro de target_dir
+    resolved_file = file_path.resolve()
+    if target_dir not in resolved_file.parents:
+        raise HTTPException(status_code=403, detail="Acceso denegado.")
+        
+    if not resolved_file.exists() or not resolved_file.is_file():
+        raise HTTPException(status_code=404, detail="Imagen no encontrada.")
+        
+    return FileResponse(resolved_file)

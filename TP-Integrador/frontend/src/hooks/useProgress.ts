@@ -8,6 +8,9 @@ const INITIAL: ProgressState = {
   percent: 0,
   running: false,
   connected: false,
+  speed: 0,
+  elapsed: 0,
+  eta: 0,
 };
 
 export interface ProgressState extends ProgressUpdate {
