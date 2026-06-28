@@ -36,7 +36,9 @@ export async function start(config: StartConfig): Promise<StartResponse> {
     body: JSON.stringify(config),
   });
   if (!res.ok) {
-    throw new Error(`Error ${res.status} al iniciar el procesamiento`);
+    const body = await res.json().catch(() => ({}));
+    const detail = body?.detail ?? `Error ${res.status} al iniciar el procesamiento`;
+    throw new Error(detail);
   }
   return res.json() as Promise<StartResponse>;
 }
