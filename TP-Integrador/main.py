@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -15,6 +16,7 @@ from core.backend import VALID_OPERATIONS, CPUBackend, get_backend
 from core.metrics import CPU_BACKEND, MetricsCollector
 from core.queue_manager import DEFAULT_QUEUE_SIZE, ImageQueue
 from pipeline.image_loader import enqueue_paths, scan_folder
+from pipeline.image_saver import ImageSaver
 from pipeline.report_exporter import export_csv
 from pipeline.result_aggregator import ResultAggregator
 from pipeline.worker import MAX_WORKER_THREADS, ProcessingWorker
@@ -38,6 +40,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--queue-size', type=int, default=DEFAULT_QUEUE_SIZE)
     parser.add_argument('--report', default=None)
+    parser.add_argument('--output-dir', default='result')
+    parser.add_argument('--no-save', action='store_true')
     return parser.parse_args()
 
 
@@ -47,13 +51,14 @@ def _process_images(
     input_queue: ImageQueue,
     result_queue: ImageQueue,
     paths: list[str],
+    io_queue: ImageQueue | None = None,
 ) -> None:
     """Lanza los workers en un pool y encola las rutas a procesar."""
     executor = ThreadPoolExecutor(max_workers=args.workers)
     for _ in range(args.workers):
         worker = ProcessingWorker(
             input_queue, result_queue, backend, args.operation,
-            backend_label=CPU_BACKEND)
+            backend_label=CPU_BACKEND, io_queue=io_queue)
         executor.submit(worker.run)
     enqueue_paths(paths, input_queue, args.workers)
     executor.shutdown(wait=True)
@@ -75,13 +80,28 @@ def _run_pipeline(
     metrics = MetricsCollector()
     input_queue = ImageQueue(args.queue_size)
     result_queue = ImageQueue(args.queue_size)
+    
+    io_queue = None
+    image_saver = None
+    if not args.no_save:
+        os.makedirs(args.output_dir, exist_ok=True)
+        io_queue = ImageQueue(10)
+        image_saver = ImageSaver(io_queue, args.output_dir)
+        image_saver.start()
+
     paths = scan_folder(args.input_dir)
     aggregator = ResultAggregator(result_queue, metrics)
     aggregator.start()
     start = time.perf_counter()
-    _process_images(args, backend, input_queue, result_queue, paths)
+    _process_images(args, backend, input_queue, result_queue, paths, io_queue)
     result_queue.put(None)
     aggregator.join()
+    
+    if io_queue is not None:
+        io_queue.put(None)
+    if image_saver is not None:
+        image_saver.join()
+        
     return metrics, time.perf_counter() - start, backend
 
 

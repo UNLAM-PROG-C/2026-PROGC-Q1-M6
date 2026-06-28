@@ -28,6 +28,7 @@ class ProcessingWorker:
         operation: str,
         *,
         backend_label: str,
+        io_queue: ImageQueue | None = None,
     ) -> None:
         """Inicializa el worker con sus colas, backend y operación.
 
@@ -43,6 +44,7 @@ class ProcessingWorker:
         self._backend = backend
         self._operation = operation
         self._backend_label = backend_label
+        self._io_queue = io_queue
 
     def run(self) -> None:
         """Procesa imágenes hasta recibir el sentinela None."""
@@ -52,6 +54,8 @@ class ProcessingWorker:
                 if path is None:
                     break
                 self._process_one(path)
+            except Exception as e:
+                _LOGGER.error("Worker error processing %s: %s", path, e)
             finally:
                 self._input_queue.task_done()
 
@@ -62,8 +66,10 @@ class ProcessingWorker:
             _LOGGER.warning('Imagen ilegible: %s', path)
             return
         start = time.perf_counter()
-        self._backend.process(image, self._operation)
+        processed_image = self._backend.process(image, self._operation)
         elapsed_ms = (time.perf_counter() - start) * MS_PER_SECOND
         name = os.path.basename(path)
+        if self._io_queue is not None:
+            self._io_queue.put((name, self._operation, processed_image))
         self._result_queue.put(
             (name, self._backend_label, self._operation, elapsed_ms))
