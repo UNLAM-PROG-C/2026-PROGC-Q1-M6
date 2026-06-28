@@ -30,7 +30,7 @@ def crear_imagenes_con_numpy(carpeta, cantidad):
     """Crea imágenes PNG de prueba en la carpeta especificada."""
     for i in range(cantidad):
         img_array = np.random.randint(0, 256, (50, 50, 3), dtype=np.uint8)
-        img_path = carpeta + f"\\test_image_{i}.png"
+        img_path = os.path.join(carpeta, f"test_image_{i}.png")
         Image.fromarray(img_array).save(img_path)
 
 
@@ -98,9 +98,8 @@ def test_pipeline_invalid_images_skipped(tmp_path):
     crear_imagenes_con_numpy(test_dir, MAX_IMAGENES_TEST_INVALID_IMAGES)
 
     for i in range(2):
-        with open(
-            f"{test_dir}\\invalid_file_{i}.txt", 'w', encoding='utf-8'
-        ) as f:
+        invalid_path = os.path.join(test_dir, f"invalid_file_{i}.txt")
+        with open(invalid_path, 'w', encoding='utf-8') as f:
             f.write("")
 
     metrics = _run_pipeline(test_dir)
