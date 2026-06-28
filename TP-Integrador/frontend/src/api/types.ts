@@ -41,4 +41,18 @@ export interface ProgressUpdate {
   speed: number;
   elapsed: number;
   eta: number;
+  speedup: number;
+}
+
+export interface ChartPoint {
+  batch: number;
+  cpu_ms: number;
+  gpu_ms: number;
+}
+
+export interface OperationResult {
+  operation: string;
+  cpu_avg_ms: number;
+  gpu_avg_ms: number;
+  speedup: number;
 }

@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from fastapi.responses import FileResponse
 
+import api.metrics_state as metrics_state
 from api.progress_hub import hub
 from api.schemas import (
     BackendInfo,
@@ -23,6 +24,7 @@ from api.schemas import (
 )
 from core.backend import CPU_BACKEND_NAME, VALID_OPERATIONS, get_backend
 from core.backend.base import GPUBackend
+from core.metrics import MetricsCollector
 from pipeline.image_loader import scan_folder
 
 _RUN_LOCK: threading.Lock = threading.Lock()
@@ -135,6 +137,25 @@ def browse(path: str = Query(default='')) -> BrowseResult:
 _QUEUE_SIZE: int = 10
 
 
+def _build_pipeline_args(config: StartConfig) -> SimpleNamespace:
+    """Construye el Namespace de argumentos del pipeline desde la config.
+
+    Args:
+        config: Configuración enviada por la SPA al iniciar.
+
+    Returns:
+        SimpleNamespace compatible con la firma de _run_pipeline.
+    """
+    return SimpleNamespace(
+        input_dir=config.input_dir,
+        output_dir=config.output_dir,
+        operation=config.operation,
+        workers=config.workers,
+        queue_size=_QUEUE_SIZE,
+        no_save=False,
+    )
+
+
 def _validate_start(config: StartConfig) -> None:
     """Valida la configuración antes de iniciar el pipeline.
 
@@ -151,23 +172,17 @@ def _validate_start(config: StartConfig) -> None:
 
 
 def _run_pipeline_task(config: StartConfig) -> None:
-    """Ejecuta el pipeline en un hilo de fondo simulando los argumentos del CLI."""
+    """Ejecuta el pipeline en un hilo de fondo."""
     from main import _run_pipeline
-
-    args = SimpleNamespace(
-        input_dir=config.input_dir,
-        output_dir=config.output_dir,
-        operation=config.operation,
-        workers=config.workers,
-        queue_size=_QUEUE_SIZE,
-        no_save=False,
-    )
-
+    mc = MetricsCollector()
+    metrics_state.set_current(mc, config.output_dir)
+    args = _build_pipeline_args(config)
     hub.set_running(True)
     try:
-        _metrics, total_seconds, _ = _run_pipeline(
-            args, on_record=hub.update_progress)
-        logging.info('Pipeline finalizado exitosamente en %.2fs', total_seconds)
+        _, secs, _ = _run_pipeline(
+            args, on_record=hub.update_progress,
+            metrics=mc, benchmark=True)
+        logging.info('Pipeline finalizado en %.2fs', secs)
     except Exception as e:
         logging.error('Error en pipeline: %s', e)
     finally:

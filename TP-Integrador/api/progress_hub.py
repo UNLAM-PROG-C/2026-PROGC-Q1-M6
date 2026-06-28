@@ -10,6 +10,16 @@ from api.schemas import ProgressUpdate
 
 ZERO: int = 0
 FULL_PERCENT: float = 100.0
+NO_SPEEDUP: float = 0.0
+
+
+def _get_speedup() -> float:
+    """Lee speedup_factor del colector activo; NO_SPEEDUP si no hay run."""
+    import api.metrics_state as metrics_state
+    collector = metrics_state.get_current()
+    if collector is None:
+        return NO_SPEEDUP
+    return float(collector.get_live_stats().get('speedup_factor', NO_SPEEDUP))
 
 
 def _percent(current: int, total: int) -> float:
@@ -95,7 +105,8 @@ class ProgressHub:
                 running=self._running,
                 speed=speed,
                 elapsed=elapsed,
-                eta=eta
+                eta=eta,
+                speedup=_get_speedup(),
             )
 
     async def wait(self) -> None:
