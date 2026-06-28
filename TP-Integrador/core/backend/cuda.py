@@ -88,20 +88,21 @@ if _CUDA_AVAILABLE:
     @cuda.jit
     def _edges_kernel(image, output):
         """Kernel CUDA de detección de bordes."""
-        x, y = cuda.grid(CUDA_GRID_DIM)  # pylint: disable=no-value-for-parameter
-        rows, cols = image.shape[0], image.shape[1]
-        m, sw = EDGE_MARGIN, SOBEL_WEIGHT
-        # pylint: disable-next=comparison-with-callable
-        if m <= x < rows - m and m <= y < cols - m:
+        # pylint: disable=no-value-for-parameter
+        x, y = cuda.grid(CUDA_GRID_DIM)
+        if (EDGE_MARGIN <= x < image.shape[0] - EDGE_MARGIN and
+                EDGE_MARGIN <= y < image.shape[1] - EDGE_MARGIN):
+            
+            # Casteamos a float (o int32) para evitar que el uint8 de Numba
+            # haga overflow/underflow al calcular diferencias negativas.
             gx = (
-                -int(image[x-m, y-m]) + int(image[x-m, y+m])
-                - sw*int(image[x, y-m]) + sw*int(image[x, y+m])
-                - int(image[x+m, y-m]) + int(image[x+m, y+m])
+                -float(image[x-EDGE_MARGIN, y-EDGE_MARGIN]) + float(image[x-EDGE_MARGIN, y+EDGE_MARGIN])
+                - SOBEL_WEIGHT*float(image[x, y-EDGE_MARGIN]) + SOBEL_WEIGHT*float(image[x, y+EDGE_MARGIN])
+                - float(image[x+EDGE_MARGIN, y-EDGE_MARGIN]) + float(image[x+EDGE_MARGIN, y+EDGE_MARGIN])
             )
             gy = (
-                -int(image[x-m, y-m]) - sw*int(image[x-m, y])
-                - int(image[x-m, y+m]) + int(image[x+m, y-m])
-                + sw*int(image[x+m, y]) + int(image[x+m, y+m])
+                -float(image[x-EDGE_MARGIN, y-EDGE_MARGIN]) - SOBEL_WEIGHT*float(image[x-EDGE_MARGIN, y]) - float(image[x-EDGE_MARGIN, y+EDGE_MARGIN])
+                + float(image[x+EDGE_MARGIN, y-EDGE_MARGIN]) + SOBEL_WEIGHT*float(image[x+EDGE_MARGIN, y]) + float(image[x+EDGE_MARGIN, y+EDGE_MARGIN])
             )
             magnitude = math.sqrt(gx*gx + gy*gy)
             output[x, y] = min(magnitude, MAX_PIXEL_VALUE)
