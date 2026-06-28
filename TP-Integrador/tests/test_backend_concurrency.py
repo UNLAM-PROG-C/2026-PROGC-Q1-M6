@@ -16,7 +16,7 @@ def test_semaphore_limits_concurrent_access():
     max_active_threads = 0
     lock = threading.Lock()
     
-    def mock_run_kernel(*args, **kwargs):
+    def mock_process_on_gpu(*args, **kwargs):
         nonlocal active_threads, max_active_threads
         with lock:
             active_threads += 1
@@ -33,7 +33,9 @@ def test_semaphore_limits_concurrent_access():
 
     # Mockeamos toda la inicialización de hardware para que pueda correr sin GPU
     with patch('core.backend.cuda.cuda.get_current_device'), \
-         patch.object(CUDABackend, '_run_kernel', side_effect=mock_run_kernel):
+         patch.object(
+             CUDABackend, '_process_on_gpu',
+             side_effect=mock_process_on_gpu):
          
         backend = CUDABackend()
         
@@ -52,7 +54,7 @@ def test_semaphore_limits_concurrent_access():
         for t in threads:
             t.join()
             
-        # Verificamos que el pico de hilos concurrentes en _run_kernel no superó el límite
+        # Verificamos que el pico de hilos concurrentes en _process_on_gpu no superó el límite
         assert max_active_threads <= MAX_GPU_CONCURRENT_BATCHES
         # Verificamos que al menos sí entró en ejecución
         assert max_active_threads > 0

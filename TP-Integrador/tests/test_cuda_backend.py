@@ -78,12 +78,13 @@ def test_cuda_process_invalid_operation():
     if HAS_CUDA_HARDWARE:
         backend = CUDABackend()
         with pytest.raises(ValueError):
-            backend.process(np.zeros((10, 10, 3), dtype=np.uint8), "blur")
+            backend.process(np.zeros((10, 10, 3), dtype=np.uint8), "invalid_op")
     else:
         with patch('core.backend.cuda.cuda.get_current_device'):
             backend = CUDABackend()
             with pytest.raises(ValueError):
-                backend.process(np.zeros((10, 10, 3), dtype=np.uint8), "blur")
+                backend.process(
+                    np.zeros((10, 10, 3), dtype=np.uint8), "invalid_op")
 
 def test_cuda_memory_not_leaked(test_image):
     # This test is always mocked to specifically check if copy_to_host was called
