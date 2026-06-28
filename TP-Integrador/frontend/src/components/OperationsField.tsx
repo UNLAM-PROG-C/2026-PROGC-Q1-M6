@@ -4,15 +4,15 @@ import type { Operation } from "@/api/types";
 
 interface OperationsFieldProps {
   operations: Operation[];
-  selected: Set<string>;
-  onToggle: (value: string) => void;
+  selected: string;
+  onSelect: (value: string) => void;
 }
 
 /** Grilla de checkboxes de operaciones (desde /api/operations). */
 export function OperationsField({
   operations,
   selected,
-  onToggle,
+  onSelect,
 }: OperationsFieldProps) {
   return (
     <div className="space-y-3">
@@ -22,11 +22,11 @@ export function OperationsField({
           <label
             key={op.value}
             className="flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-background/40 px-3 py-2.5 text-sm transition-colors hover:border-primary/50 hover:bg-secondary/60"
+            onClick={() => onSelect(op.value)}
           >
-            <Checkbox
-              checked={selected.has(op.value)}
-              onCheckedChange={() => onToggle(op.value)}
-            />
+            <div className={`flex h-4 w-4 items-center justify-center rounded-full border ${selected === op.value ? 'border-primary bg-primary' : 'border-primary'}`}>
+              {selected === op.value && <div className="h-2 w-2 rounded-full bg-primary-foreground" />}
+            </div>
             {op.label}
           </label>
         ))}

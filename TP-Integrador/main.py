@@ -90,7 +90,7 @@ def _run_pipeline(
         image_saver.start()
 
     paths = scan_folder(args.input_dir)
-    aggregator = ResultAggregator(result_queue, metrics)
+    aggregator = ResultAggregator(result_queue, metrics, len(paths))
     aggregator.start()
     start = time.perf_counter()
     _process_images(args, backend, input_queue, result_queue, paths, io_queue)

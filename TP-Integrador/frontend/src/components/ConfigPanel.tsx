@@ -13,12 +13,11 @@ import { FolderField } from "@/components/FolderField";
 import { OperationsField } from "@/components/OperationsField";
 import { WorkersField } from "@/components/WorkersField";
 import { useOperations } from "@/hooks/useOperations";
-import { useStartConfig } from "@/hooks/useStartConfig";
+import { type StartConfigForm } from "@/hooks/useStartConfig";
 
 /** Panel de configuración del procesamiento (#20). */
-export function ConfigPanel() {
+export function ConfigPanel({ config }: { config: StartConfigForm }) {
   const operations = useOperations();
-  const config = useStartConfig();
   const [status, setStatus] = useState<string | null>(null);
 
   const handleStart = async () => {
@@ -59,8 +58,8 @@ export function ConfigPanel() {
         />
         <OperationsField
           operations={operations}
-          selected={config.operations}
-          onToggle={config.toggleOperation}
+          selected={config.operation}
+          onSelect={config.setOperation}
         />
         <WorkersField workers={config.workers} onChange={config.setWorkers} />
 

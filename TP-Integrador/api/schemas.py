@@ -44,7 +44,7 @@ class StartConfig(BaseModel):
 
     input_dir: str
     output_dir: str
-    operations: list[str] = Field(min_length=1)
+    operation: str = Field(...)
     workers: int = Field(ge=MIN_WORKERS, le=MAX_WORKERS)
 
 
@@ -62,3 +62,6 @@ class ProgressUpdate(BaseModel):
     total: int
     percent: float
     running: bool
+    speed: float = 0.0
+    elapsed: float = 0.0
+    eta: float = 0.0

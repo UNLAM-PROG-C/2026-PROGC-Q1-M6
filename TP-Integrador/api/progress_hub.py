@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 
 from api.schemas import ProgressUpdate
 
@@ -31,6 +32,9 @@ class ProgressHub:
         self._current: int = ZERO
         self._total: int = ZERO
         self._running: bool = False
+        self._start_time: float = 0.0
+        self._final_elapsed: float = 0.0
+        self._final_speed: float = 0.0
         self._loop: asyncio.AbstractEventLoop | None = None
         self._event: asyncio.Event | None = None
 
@@ -50,12 +54,19 @@ class ProgressHub:
             self._current = current
             self._total = total
             self._running = current < total
+            if not self._running and self._start_time > 0:
+                self._final_elapsed = time.perf_counter() - self._start_time
+                self._final_speed = self._current / self._final_elapsed if self._final_elapsed > 0 else 0.0
         self._notify()
 
     def set_running(self, running: bool) -> None:
         """Marca si hay un procesamiento en curso."""
         with self._lock:
             self._running = running
+            if running:
+                self._start_time = time.perf_counter()
+                self._current = ZERO
+                self._total = ZERO
         self._notify()
 
     def snapshot(self) -> ProgressUpdate:
@@ -65,11 +76,26 @@ class ProgressHub:
             ProgressUpdate con current, total, percent y running.
         """
         with self._lock:
+            elapsed = 0.0
+            speed = 0.0
+            eta = 0.0
+            if self._running and self._start_time > 0:
+                elapsed = time.perf_counter() - self._start_time
+                speed = self._current / elapsed if elapsed > 0 else 0.0
+                eta = (self._total - self._current) / speed if speed > 0 else 0.0
+            elif not self._running and self._current > 0 and self._current == self._total:
+                elapsed = self._final_elapsed
+                speed = self._final_speed
+                eta = 0.0
+
             return ProgressUpdate(
                 current=self._current,
                 total=self._total,
                 percent=_percent(self._current, self._total),
                 running=self._running,
+                speed=speed,
+                elapsed=elapsed,
+                eta=eta
             )
 
     async def wait(self) -> None:

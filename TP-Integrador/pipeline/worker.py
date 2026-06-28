@@ -61,7 +61,13 @@ class ProcessingWorker:
 
     def _process_one(self, path: str) -> None:
         """Procesa una imagen y encola su métrica de tiempo."""
-        image = cv2.imread(path)
+        # Usar np.fromfile y cv2.imdecode para soportar rutas con tildes en Windows
+        import numpy as np
+        try:
+            image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        except Exception:
+            image = None
+            
         if image is None:
             _LOGGER.warning('Imagen ilegible: %s', path)
             return

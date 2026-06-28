@@ -24,7 +24,7 @@ export interface BrowseResult {
 export interface StartConfig {
   input_dir: string;
   output_dir: string;
-  operations: string[];
+  operation: string;
   workers: number;
 }
 
@@ -38,4 +38,7 @@ export interface ProgressUpdate {
   total: number;
   percent: number;
   running: boolean;
+  speed: number;
+  elapsed: number;
+  eta: number;
 }

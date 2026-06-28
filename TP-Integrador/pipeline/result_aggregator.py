@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 
+from api.progress_hub import hub
 from core.metrics import MetricsCollector
 from core.queue_manager import ImageQueue
 
@@ -18,16 +19,20 @@ class ResultAggregator(threading.Thread):
         self,
         result_queue: ImageQueue,
         metrics: MetricsCollector,
+        total_images: int = 0,
     ) -> None:
         """Inicializa el agregador con su cola y colector.
 
         Args:
             result_queue: Cola de resultados producida por los workers.
             metrics: Colector thread-safe de métricas.
+            total_images: Cantidad total de imágenes a procesar.
         """
         super().__init__(name='result-aggregator')
         self._result_queue = result_queue
         self._metrics = metrics
+        self._total_images = total_images
+        self._processed = 0
 
     def run(self) -> None:
         """Consume resultados hasta recibir el sentinela None."""
@@ -37,6 +42,8 @@ class ResultAggregator(threading.Thread):
                 if result is None:
                     break
                 self._metrics.record(*result)
+                self._processed += 1
+                hub.update_progress(self._processed, self._total_images)
             finally:
                 self._result_queue.task_done()
         _LOGGER.info('Agregador de resultados finalizado')
