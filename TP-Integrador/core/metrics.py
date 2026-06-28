@@ -10,6 +10,7 @@ ZERO_THROUGHPUT: float = 0.0
 NO_SPEEDUP: float = 0.0
 CPU_BACKEND: str = 'cpu'
 GPU_BACKEND: str = 'gpu'
+CPU_FALLBACK_BACKEND: str = 'cpu-fallback'
 STATS_WINDOW_SIZE: int = 10
 NO_TOTAL: int = 0
 ZERO_ELAPSED: float = 0.0

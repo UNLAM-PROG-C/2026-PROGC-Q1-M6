@@ -73,8 +73,8 @@ def test_opencl_edges_output_shape(test_image):
 def test_opencl_process_invalid_operation():
     if HAS_OPENCL_HARDWARE:
         backend = OpenCLBackend()
-        with pytest.raises(NotImplementedError):
-            backend.process(np.zeros((10, 10, 3), dtype=np.uint8), "blur")
+        with pytest.raises(ValueError):
+            backend.process(np.zeros((10, 10, 3), dtype=np.uint8), "invalid_op")
     else:
         with patch('core.backend.opencl.cl.get_platforms') as mock_platforms, \
              patch('core.backend.opencl.cl.Context'), \
@@ -86,8 +86,9 @@ def test_opencl_process_invalid_operation():
             mock_platforms.return_value = [mock_platform]
 
             backend = OpenCLBackend()
-            with pytest.raises(NotImplementedError):
-                backend.process(np.zeros((10, 10, 3), dtype=np.uint8), "blur")
+            with pytest.raises(ValueError):
+                backend.process(
+                    np.zeros((10, 10, 3), dtype=np.uint8), "invalid_op")
 
 def test_opencl_context_initialized_once():
     # We always use mock for this test so we can count calls to cl.Context
