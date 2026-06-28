@@ -21,9 +21,9 @@ MAX_IMAGENES_TEST_INVALID_IMAGES = 3
 MAX_IMAGE_SIZE = 10
 
 #Inputs
-PATH_FULL_CPU_PIPELINE_FOLDER = r"public\\images\\test_full_cpu_pipeline"
-PATH_EMPTY_FOLDER = r"public\\images\\test_empty_folder"
-PATH_INVALID_IMAGES_FOLDER = r"public\\images\\test_imagenes_invalidas"
+PATH_FULL_CPU_PIPELINE_FOLDER = r"tests\fixtures\images\test_full_cpu_pipeline"
+PATH_EMPTY_FOLDER = r"tests\fixtures\images\test_empty_folder"
+PATH_INVALID_IMAGES_FOLDER = r"tests\fixtures\images\test_imagenes_invalidas"
 OPERATION_NAME_TEST = "grayscale"
 
 def crear_imagenes_con_numpy(carpeta, cantidad):
@@ -53,7 +53,7 @@ def _process_images(
 def test_full_cpu_pipeline():
     # Crear carpeta temporal para las imágenes
     test_dir = PATH_FULL_CPU_PIPELINE_FOLDER
-    os.mkdir(test_dir) if not os.path.exists(test_dir) else None
+    os.makedirs(test_dir, exist_ok=True)
 
     # Generar 5 imágenes PNG de prueba (50x50 px)
     crear_imagenes_con_numpy(test_dir, MAX_IMAGENES_TEST_FULL_CPU_PIPELINE)
