@@ -19,6 +19,39 @@ CANNY_LOW_THRESHOLD: int = 100
 CANNY_HIGH_THRESHOLD: int = 200
 MAX_PIXEL_VALUE: int = 255
 
+# Constantes del desenfoque gaussiano (kernel 5x5 separable).
+BLUR_KERNEL_SIZE: int = 5
+BLUR_RADIUS: int = 2
+GAUSSIAN_BLUR_WEIGHTS_1D: tuple[float, ...] = (
+    0.0625,
+    0.25,
+    0.375,
+    0.25,
+    0.0625,
+)
+
+# Constantes de la ecualización de histograma.
+HISTOGRAM_BINS: int = 256
+
+
+def compute_equalize_lut(histogram: np.ndarray) -> np.ndarray:
+    """Construye la LUT de ecualización a partir del histograma.
+
+    Args:
+        histogram: Conteo de píxeles por nivel de gris (HISTOGRAM_BINS).
+
+    Returns:
+        Tabla de mapeo uint8 (HISTOGRAM_BINS) que ecualiza el histograma.
+    """
+    cdf = histogram.cumsum()
+    nonzero = cdf[cdf > 0]
+    cdf_min = nonzero[0] if nonzero.size else 0
+    span = cdf[-1] - cdf_min
+    if span <= 0:
+        return np.zeros(HISTOGRAM_BINS, dtype=np.uint8)
+    lut = (cdf - cdf_min) * MAX_PIXEL_VALUE / span
+    return np.clip(lut, 0, MAX_PIXEL_VALUE).astype(np.uint8)
+
 CPU_BACKEND_NAME = "CPU"
 CUDA_BACKEND_NAME = "CUDA"
 OPENCL_BACKEND_NAME = "OpenCL"
