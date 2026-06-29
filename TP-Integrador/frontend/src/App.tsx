@@ -1,4 +1,3 @@
-import { Boxes } from "lucide-react";
 import { BackendIndicator } from "@/components/BackendIndicator";
 import { ConfigPanel } from "@/components/ConfigPanel";
 import { ProgressPanel } from "@/components/ProgressPanel";
@@ -18,8 +17,8 @@ export default function App() {
       <header className="sticky top-0 z-50 border-b border-white/5 bg-background/40 backdrop-blur-2xl shadow-sm">
         <div className="container flex h-16 max-w-6xl items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15 text-primary ring-1 ring-primary/30">
-              <Boxes className="h-5 w-5" />
+            <span className="flex h-9 w-9 overflow-hidden items-center justify-center rounded-lg ring-1 ring-primary/30">
+              <img src="/icon.png" alt="ParallelVision Logo" className="h-full w-full object-cover" />
             </span>
             <div className="leading-tight">
               <h1 className="text-sm font-semibold tracking-tight">
