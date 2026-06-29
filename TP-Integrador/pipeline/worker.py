@@ -13,6 +13,11 @@ from core.backend.base import GPUBackend
 from core.metrics import CPU_FALLBACK_BACKEND
 from core.queue_manager import ImageQueue
 
+try:
+    from core.backend.cuda import _COMPUTE_TLS as _GPU_COMPUTE_TLS
+except ImportError:
+    _GPU_COMPUTE_TLS = None
+
 MAX_WORKER_THREADS: int = 4
 MS_PER_SECOND: float = 1000.0
 
@@ -95,9 +100,14 @@ class ProcessingWorker:
             Tupla (etiqueta_efectiva, ms, imagen_procesada).
         """
         _FALLBACK_TLS.triggered = False
+        if _GPU_COMPUTE_TLS is not None:
+            _GPU_COMPUTE_TLS.last_ms = None
         start = time.perf_counter()
         processed = backend.process(image, self._operation)
         elapsed_ms = (time.perf_counter() - start) * MS_PER_SECOND
+        gpu_ms = getattr(_GPU_COMPUTE_TLS, 'last_ms', None)
+        if gpu_ms is not None:
+            elapsed_ms = gpu_ms
         actual = (CPU_FALLBACK_BACKEND
                   if getattr(_FALLBACK_TLS, 'triggered', False)
                   else label)

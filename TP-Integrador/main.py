@@ -107,6 +107,15 @@ def _make_benchmark_backends(
     return CPUBackend(), gpu, GPU_BACKEND
 
 
+def _warmup_backend(backend: GPUBackend | None, operation: str) -> None:
+    """Llama a warmup() en el backend si está disponible."""
+    if backend is None:
+        return
+    warmup_fn = getattr(backend, 'warmup', None)
+    if warmup_fn is not None:
+        warmup_fn(operation)
+
+
 def _process_images(
     args: argparse.Namespace,
     backend: GPUBackend,
@@ -129,6 +138,8 @@ def _process_images(
         bench_backend: Backend secundario para benchmark (opcional).
         bench_label: Etiqueta del bench_backend (opcional).
     """
+    _warmup_backend(backend, args.operation)
+    _warmup_backend(bench_backend, args.operation)
     executor = ThreadPoolExecutor(max_workers=args.workers)
     for _ in range(args.workers):
         worker = ProcessingWorker(

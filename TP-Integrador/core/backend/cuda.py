@@ -6,6 +6,8 @@ import logging
 import math
 import os
 import sys
+import threading
+import time
 from collections.abc import Callable
 
 import numpy as np
@@ -24,6 +26,7 @@ from core.backend.base import (
 from core.backend.cpu import CPUBackend, _to_grayscale
 
 _LOGGER = logging.getLogger(__name__)
+_COMPUTE_TLS = threading.local()
 
 # Parche para detectar CUDA Toolkit en Windows x64 (v12/v13) con Numba
 if sys.platform == 'win32':
@@ -66,6 +69,10 @@ except ImportError:
 
 
 # CONSTANTES CUDA
+WARMUP_IMAGE_SIZE: int = 32
+RGB_CHANNELS: int = 3
+_MS_PER_SECOND: float = 1000.0
+
 CUDA_THREADS_PER_BLOCK: int = 16
 CUDA_GRID_DIM: int = 2
 EDGE_MARGIN: int = 1
@@ -199,10 +206,22 @@ class CUDABackend(GPUBackend):
             raise ValueError(f'Unknown operation: {operation!r}')
         with _gpu_semaphore:
             try:
-                return self._process_on_gpu(image, operation)
+                start = time.perf_counter()
+                result = self._process_on_gpu(image, operation)
+                _COMPUTE_TLS.last_ms = (
+                    (time.perf_counter() - start) * _MS_PER_SECOND)
+                return result
             except _GPU_OOM_ERRORS as exc:
                 self._handle_oom(image, exc)
                 return self._cpu_fallback.process(image, operation)
+
+    def warmup(self, operation: str) -> None:
+        """Compila kernels CUDA con imagen dummy; descarta el tiempo."""
+        if not _CUDA_AVAILABLE:
+            return
+        _shape = (WARMUP_IMAGE_SIZE, WARMUP_IMAGE_SIZE, RGB_CHANNELS)
+        dummy = np.zeros(_shape, dtype=np.uint8)
+        self.process(dummy, operation)
 
     def _handle_oom(self, image: np.ndarray, exc: Exception) -> None:
         """Loggea el OOM de GPU y notifica el fallback configurado."""
