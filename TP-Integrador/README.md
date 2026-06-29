@@ -113,15 +113,14 @@ El reporte CSV listará todas las métricas procesadas individualmente y puede s
 
 La interfaz gráfica y el dashboard funcionan mediante una arquitectura cliente-servidor (Backend FastAPI + Frontend React/Vite).
 
-#### 1. Preparar imágenes de prueba
-Puedes descargar imágenes aleatorias para probar el sistema usando el script de descarga incorporado:
+> [!NOTE]
+> **Opcional: Preparar imágenes de prueba**
+> Puedes descargar imágenes aleatorias para probar el sistema usando el script incorporado (usa `-n` para cantidad y `-d` para destino):
+> ```bash
+> python scripts/descargar_imagenes.py -n 100 -d public/images/in
+> ```
 
-```bash
-python scripts/descargar_imagenes.py -n 100 -d public/images/in
-```
-*(Usa `-n` para indicar la cantidad y `-d` para el directorio destino).*
-
-#### 2. Levantar el Servidor Backend (API)
+#### 1. Levantar el Servidor Backend (API)
 El backend expone la API REST y los WebSockets para la comunicación en tiempo real. Ejecuta el servidor desde la raíz del proyecto:
 
 ```bash
@@ -129,7 +128,7 @@ python -m uvicorn api.main:app --reload
 ```
 *(El backend correrá en `http://localhost:8000`).*
 
-#### 3. Levantar el Frontend (Dashboard)
+#### 2. Levantar el Frontend (Dashboard)
 El frontend proporciona el panel interactivo. En una nueva terminal, entra a la carpeta, instala las dependencias y corre el servidor de desarrollo:
 
 ```bash
@@ -139,12 +138,12 @@ npm run dev
 ```
 *(El frontend correrá en la url que indique Vite, ej. `http://localhost:5173`).*
 
-#### 4. Paso a Paso en la Interfaz
+#### 3. Paso a Paso en la Interfaz
 
 1. **Seleccionar Carpetas**: En el panel de la UI, utiliza los campos correspondientes para indicar el directorio de entrada (donde están tus imágenes originales) y el directorio de salida (donde se guardarán las modificadas).
 2. **Elegir Operaciones**: Selecciona la transformación o filtro deseado (`grayscale`, `edges`, `blur`, `equalize`) desde el menú de opciones.
 3. **Iniciar**: Haz clic en el botón de iniciar procesamiento. Podrás observar en tiempo real cómo avanza la barra de progreso para las distintas tareas.
 
-#### 5. Indicador de Backend y Gráfico de Speedup
+#### 4. Indicador de Backend y Gráfico de Speedup
 - **Explicación del indicador de backend**: En el dashboard podrás visualizar si tu procesamiento está derivándose a `CUDA`, `OpenCL` o utilizando el `CPU`. Esto confirma cuál estrategia de hardware se auto-seleccionó al arrancar el servidor según tus componentes.
 - **Cómo interpretar el gráfico de speedup**: El sistema genera un gráfico que compara la eficiencia real (con la aceleración GPU) frente a un escenario simulado puro de CPU. Un valor de *Speedup de 3.5x* indica que el procesamiento terminó 3.5 veces más rápido de lo que habría tardado si no se hubiese usado aceleración por hardware.
