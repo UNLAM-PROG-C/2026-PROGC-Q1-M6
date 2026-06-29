@@ -1,4 +1,4 @@
-import { Clock, Gauge, Hourglass, Radio, Zap } from "lucide-react";
+import { Radio } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -7,14 +7,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { MetricStat } from "@/components/MetricStat";
 import type { ProgressState } from "@/hooks/useProgress";
 
 interface ProgressPanelProps {
   progress: ProgressState;
 }
 
-const PLACEHOLDER = "—";
 
 /** Panel de progreso global en tiempo real (#21, #28). */
 export function ProgressPanel({ progress }: ProgressPanelProps) {
@@ -47,52 +45,11 @@ export function ProgressPanel({ progress }: ProgressPanelProps) {
           </div>
           <Progress value={progress.percent} />
         </div>
-
-        <div className="grid grid-cols-4 gap-3">
-          <MetricStat
-            icon={Gauge}
-            label="Velocidad"
-            value={progress.speed > 0 ? progress.speed.toFixed(1) : PLACEHOLDER}
-            hint="img/s"
-          />
-          <MetricStat
-            icon={Clock}
-            label="Transcurrido"
-            value={progress.elapsed > 0 ? formatTime(progress.elapsed) : PLACEHOLDER}
-            hint="mm:ss"
-          />
-          <MetricStat
-            icon={Hourglass}
-            label="ETA"
-            value={
-              progress.running && progress.eta > 0
-                ? formatTime(progress.eta)
-                : PLACEHOLDER
-            }
-            hint="estimado"
-          />
-          <MetricStat
-            icon={Zap}
-            label="Speedup"
-            value={
-              progress.speedup > 0
-                ? `${progress.speedup.toFixed(1)}×`
-                : PLACEHOLDER
-            }
-            hint="CPU/GPU"
-          />
-        </div>
       </CardContent>
     </Card>
   );
 }
 
-function formatTime(seconds: number): string {
-  if (!seconds || isNaN(seconds)) return "00:00";
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-}
 
 function ConnectionDot({ connected }: { connected: boolean }) {
   return (

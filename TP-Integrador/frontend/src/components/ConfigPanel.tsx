@@ -23,8 +23,7 @@ export function ConfigPanel({ config }: { config: StartConfigForm }) {
   const handleStart = async () => {
     setStatus(null);
     try {
-      const res = await start(config.toPayload());
-      setStatus(res.message);
+      await start(config.toPayload());
     } catch (err) {
       setStatus((err as Error).message);
     }

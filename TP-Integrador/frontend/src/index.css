@@ -53,14 +53,19 @@
     font-feature-settings: "cv11", "ss01";
     background-image:
       radial-gradient(
-        60rem 60rem at 110% -10%,
-        hsl(256 92% 67% / 0.1),
-        transparent 60%
+        50vw 50vh at 110% -10%,
+        hsl(var(--primary) / 0.15),
+        transparent 70%
       ),
       radial-gradient(
-        50rem 50rem at -10% 10%,
-        hsl(190 90% 50% / 0.06),
-        transparent 55%
+        40vw 40vh at -10% 10%,
+        hsl(var(--accent) / 0.1),
+        transparent 65%
+      ),
+      radial-gradient(
+        30vw 30vh at 50% 100%,
+        hsl(var(--primary) / 0.05),
+        transparent 50%
       );
     background-attachment: fixed;
   }

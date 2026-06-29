@@ -23,7 +23,7 @@ export function FolderField({
     <div className="space-y-2">
       <Label>{label}</Label>
       <div className="flex items-center gap-2">
-        <div className="flex h-10 flex-1 items-center truncate rounded-md border border-input bg-background/40 px-3 font-mono text-xs text-muted-foreground">
+        <div className="flex min-h-10 flex-1 min-w-0 items-center break-all rounded-md border border-input bg-background/40 px-3 py-2 font-mono text-xs text-muted-foreground">
           {value || placeholder}
         </div>
         <FolderPicker title={dialogTitle} onSelect={onSelect}>
