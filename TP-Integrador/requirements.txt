@@ -8,3 +8,4 @@ pytest
 fastapi
 uvicorn[standard]
 httpx2
+requests
