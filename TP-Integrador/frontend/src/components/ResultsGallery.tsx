@@ -95,29 +95,29 @@ export function ResultsGallery({ inputDir, outputDir }: ResultsGalleryProps) {
           )}
           
           {results.length === 0 && !loading && !error ? (
-            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground border-2 border-dashed rounded-lg">
+            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground border-2 border-dashed border-border/50 rounded-xl bg-card/20 backdrop-blur-sm">
               <FolderOpen className="w-12 h-12 mb-4 opacity-20" />
               <p>No se encontraron resultados en esta carpeta.</p>
               <p className="text-xs mt-1">Asegurate de iniciar un procesamiento primero.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 animate-in fade-in duration-700">
               {results.map((item, idx) => {
                 const thumbnailUrl = `/api/image?dir_path=${encodeURIComponent(outputDir)}&filename=${encodeURIComponent(item.transformed_filename)}`;
                 return (
                   <div 
                     key={idx} 
-                    className="group relative aspect-square rounded-lg overflow-hidden border bg-black/5 cursor-pointer hover:ring-2 hover:ring-primary transition-all"
+                    className="group relative aspect-square rounded-xl overflow-hidden border border-border/50 bg-card/40 cursor-pointer hover:border-primary/50 hover:shadow-xl hover:shadow-primary/20 hover:-translate-y-1 transition-all duration-300"
                     onClick={() => openInspector(idx)}
                   >
                     <img 
                       src={thumbnailUrl} 
                       alt={item.transformed_filename}
-                      className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
                       loading="lazy"
                     />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                      <Search className="w-8 h-8 text-white drop-shadow-md" />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center backdrop-blur-[2px]">
+                      <Search className="w-8 h-8 text-white drop-shadow-md scale-75 group-hover:scale-100 transition-transform duration-300" />
                     </div>
                     <div className="absolute bottom-0 left-0 right-0 bg-black/70 p-2 transform translate-y-full group-hover:translate-y-0 transition-transform">
                       <p className="text-[10px] text-white truncate" title={item.original_filename}>

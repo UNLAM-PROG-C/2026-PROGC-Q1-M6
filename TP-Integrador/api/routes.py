@@ -96,13 +96,10 @@ def read_operations() -> list[Operation]:
 
 
 def _safe_resolve(raw: str) -> Path:
-    """Resuelve ``raw`` confinándolo a BROWSE_ROOT."""
+    """Resuelve ``raw`` permitiendo cualquier ruta."""
     if not raw:
-        return BROWSE_ROOT
-    target = Path(raw).resolve()
-    if target == BROWSE_ROOT or BROWSE_ROOT in target.parents:
-        return target
-    return BROWSE_ROOT
+        return Path.cwd().resolve()
+    return Path(raw).resolve()
 
 
 def _list_subdirs(target: Path) -> list[DirEntry]:
@@ -120,18 +117,21 @@ def _list_subdirs(target: Path) -> list[DirEntry]:
 
 @router.get('/browse')
 def browse(path: str = Query(default='')) -> BrowseResult:
-    """Navega los subdirectorios del filesystem del servidor.
-
-    Args:
-        path: Ruta absoluta a inspeccionar; vacía usa la raíz.
-
-    Returns:
-        BrowseResult con la ruta actual, su padre y subdirectorios.
-    """
+    """Navega los subdirectorios del filesystem del servidor."""
     target = _safe_resolve(path)
-    parent = None if target == BROWSE_ROOT else str(target.parent)
+    parent = None if target.parent == target else str(target.parent)
+    entries = _list_subdirs(target)
+    
+    import os
+    if os.name == 'nt' and target.parent == target:
+        import string
+        drives = [f"{d}:\\" for d in string.ascii_uppercase if os.path.exists(f"{d}:\\")]
+        for drive in drives:
+            if drive.rstrip('\\') != str(target).rstrip('\\'):
+                entries.append(DirEntry(name=f"Drive {drive}", path=drive))
+
     return BrowseResult(
-        path=str(target), parent=parent, entries=_list_subdirs(target))
+        path=str(target), parent=parent, entries=entries)
 
 
 _QUEUE_SIZE: int = 10
