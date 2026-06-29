@@ -60,7 +60,7 @@ Sigue estos pasos para clonar el repositorio, crear un entorno virtual e instala
 
 ```bash
 # 1. Clonar el repositorio
-git clone <URL_DEL_REPOSITORIO>
+git clone https://github.com/UNLAM-PROG-C/2026-PROGC-Q1-M6.git
 cd TP-Integrador
 
 # 2. Crear entorno virtual
