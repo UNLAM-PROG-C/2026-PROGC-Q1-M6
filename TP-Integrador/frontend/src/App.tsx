@@ -3,11 +3,15 @@ import { BackendIndicator } from "@/components/BackendIndicator";
 import { ConfigPanel } from "@/components/ConfigPanel";
 import { ProgressPanel } from "@/components/ProgressPanel";
 import { ResultsGallery } from "@/components/ResultsGallery";
+import { ResultsTable } from "@/components/ResultsTable";
+import { SpeedupChart } from "@/components/SpeedupChart";
+import { useProgress } from "@/hooks/useProgress";
 import { useStartConfig } from "@/hooks/useStartConfig";
 
-/** Layout principal del dashboard: header + dos columnas (#20, #21). */
+/** Layout principal del dashboard: header + dos columnas (#20, #21, #28). */
 export default function App() {
   const config = useStartConfig();
+  const progress = useProgress();
 
   return (
     <div className="min-h-screen">
@@ -33,14 +37,17 @@ export default function App() {
       <main className="container max-w-6xl py-8">
         <div className="grid gap-6 lg:grid-cols-2">
           <ConfigPanel config={config} />
-          <ProgressPanel />
+          <ProgressPanel progress={progress} />
         </div>
-        
-        <ResultsGallery 
-          inputDir={config.inputDir} 
-          outputDir={config.outputDir} 
+
+        <SpeedupChart progress={progress} />
+        <ResultsTable progress={progress} />
+
+        <ResultsGallery
+          inputDir={config.inputDir}
+          outputDir={config.outputDir}
         />
-        
+
         <footer className="mt-10 text-center text-xs text-muted-foreground">
           ParallelVision · UNLaM Programación Concurrente · Capa 5 (Dashboard)
         </footer>

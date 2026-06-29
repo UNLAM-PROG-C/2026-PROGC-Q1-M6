@@ -11,6 +11,7 @@ const INITIAL: ProgressState = {
   speed: 0,
   elapsed: 0,
   eta: 0,
+  speedup: 0,
 };
 
 export interface ProgressState extends ProgressUpdate {

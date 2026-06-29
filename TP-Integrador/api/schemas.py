@@ -65,3 +65,21 @@ class ProgressUpdate(BaseModel):
     speed: float = 0.0
     elapsed: float = 0.0
     eta: float = 0.0
+    speedup: float = 0.0
+
+
+class ChartPoint(BaseModel):
+    """Punto de la serie temporal CPU vs GPU por lote."""
+
+    batch: int
+    cpu_ms: float
+    gpu_ms: float
+
+
+class OperationResult(BaseModel):
+    """Resultado por operación con tiempos y speedup."""
+
+    operation: str
+    cpu_avg_ms: float
+    gpu_avg_ms: float
+    speedup: float

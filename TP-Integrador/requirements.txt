@@ -7,3 +7,4 @@ pylint
 pytest
 fastapi
 uvicorn[standard]
+httpx2

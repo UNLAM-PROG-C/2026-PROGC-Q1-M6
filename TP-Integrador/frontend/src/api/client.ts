@@ -1,7 +1,9 @@
 import type {
   BackendInfo,
   BrowseResult,
+  ChartPoint,
   Operation,
+  OperationResult,
   StartConfig,
   StartResponse,
 } from "@/api/types";
@@ -27,6 +29,21 @@ export function getOperations(): Promise<Operation[]> {
 export function browse(path = ""): Promise<BrowseResult> {
   const query = path ? `?path=${encodeURIComponent(path)}` : "";
   return getJson<BrowseResult>(`${API_BASE}/browse${query}`);
+}
+
+export function getChart(): Promise<ChartPoint[]> {
+  return getJson<ChartPoint[]>(`${API_BASE}/metrics/chart`);
+}
+
+export function getSummary(): Promise<OperationResult[]> {
+  return getJson<OperationResult[]>(`${API_BASE}/metrics/summary`);
+}
+
+export function downloadMetricsCsv(): void {
+  const a = document.createElement("a");
+  a.href = `${API_BASE}/metrics/export`;
+  a.download = "parallelvision_report.csv";
+  a.click();
 }
 
 export async function start(config: StartConfig): Promise<StartResponse> {

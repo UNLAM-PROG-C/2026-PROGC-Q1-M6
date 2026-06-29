@@ -14,7 +14,8 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
 from core.backend import VALID_OPERATIONS, CPUBackend, get_backend
-from core.metrics import CPU_BACKEND, MetricsCollector
+from core.backend.base import CPU_BACKEND_NAME, GPUBackend
+from core.metrics import CPU_BACKEND, GPU_BACKEND, MetricsCollector
 from core.queue_manager import DEFAULT_QUEUE_SIZE, ImageQueue
 from pipeline.image_loader import enqueue_paths, scan_folder
 from pipeline.image_saver import ImageSaver
@@ -24,6 +25,8 @@ from pipeline.worker import MAX_WORKER_THREADS, ProcessingWorker
 
 _LOG_FORMAT: str = '[%(levelname)s] %(message)s'
 _SUMMARY_HEADER: str = '\nResumen por operación:'
+IO_QUEUE_SIZE: int = 10
+BENCHMARK_RECORDS_PER_IMAGE: int = 2
 
 
 def _parse_args() -> argparse.Namespace:
@@ -46,20 +49,92 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _setup_io(
+    args: argparse.Namespace,
+) -> tuple[ImageQueue | None, ImageSaver | None]:
+    """Crea y arranca el guardado de imágenes si no está desactivado.
+
+    Args:
+        args: Argumentos de configuración del pipeline.
+
+    Returns:
+        Tupla (io_queue, saver); ambos None si no_save está activo.
+    """
+    if args.no_save:
+        return None, None
+    os.makedirs(args.output_dir, exist_ok=True)
+    io_queue: ImageQueue = ImageQueue(IO_QUEUE_SIZE)
+    saver = ImageSaver(io_queue, args.output_dir)
+    saver.start()
+    return io_queue, saver
+
+
+def _teardown_io(
+    io_queue: ImageQueue | None,
+    saver: ImageSaver | None,
+) -> None:
+    """Drena la cola de E/S y espera al ImageSaver.
+
+    Args:
+        io_queue: Cola de imágenes a guardar; None si no_save activo.
+        saver: Hilo ImageSaver a detener; None si no_save activo.
+    """
+    if io_queue is not None:
+        io_queue.put(None)
+    if saver is not None:
+        saver.join()
+
+
+def _make_benchmark_backends(
+    benchmark: bool,
+) -> tuple[GPUBackend, GPUBackend | None, str | None]:
+    """Devuelve (backend_primario, bench_backend, bench_label).
+
+    En modo benchmark, el primario es CPUBackend y el bench es el
+    backend GPU detectado. Si no hay GPU real, cae a modo simple.
+
+    Args:
+        benchmark: True para activar el modo benchmark CPU+GPU.
+
+    Returns:
+        Tupla (primario, bench, bench_label); bench es None sin GPU.
+    """
+    if not benchmark:
+        return get_backend(), None, None
+    gpu = get_backend()
+    if gpu.backend_name == CPU_BACKEND_NAME:
+        return gpu, None, None
+    return CPUBackend(), gpu, GPU_BACKEND
+
+
 def _process_images(
     args: argparse.Namespace,
-    backend: CPUBackend,
+    backend: GPUBackend,
     input_queue: ImageQueue,
     result_queue: ImageQueue,
     paths: list[str],
     io_queue: ImageQueue | None = None,
+    bench_backend: GPUBackend | None = None,
+    bench_label: str | None = None,
 ) -> None:
-    """Lanza los workers en un pool y encola las rutas a procesar."""
+    """Lanza los workers en un pool y encola las rutas a procesar.
+
+    Args:
+        args: Argumentos de configuración del pipeline.
+        backend: Backend principal de procesamiento.
+        input_queue: Cola de rutas de entrada.
+        result_queue: Cola de resultados de salida.
+        paths: Rutas de imágenes a procesar.
+        io_queue: Cola de guardado de imágenes (opcional).
+        bench_backend: Backend secundario para benchmark (opcional).
+        bench_label: Etiqueta del bench_backend (opcional).
+    """
     executor = ThreadPoolExecutor(max_workers=args.workers)
     for _ in range(args.workers):
         worker = ProcessingWorker(
             input_queue, result_queue, backend, args.operation,
-            backend_label=CPU_BACKEND, io_queue=io_queue)
+            backend_label=CPU_BACKEND, io_queue=io_queue,
+            bench_backend=bench_backend, bench_label=bench_label)
         executor.submit(worker.run)
     enqueue_paths(paths, input_queue, args.workers)
     executor.shutdown(wait=True)
@@ -69,43 +144,36 @@ def _run_pipeline(
     args: argparse.Namespace,
     *,
     on_record: Callable[[int, int], None] | None = None,
-) -> tuple[MetricsCollector, float, CPUBackend]:
+    metrics: MetricsCollector | None = None,
+    benchmark: bool = False,
+) -> tuple[MetricsCollector, float, GPUBackend]:
     """Ejecuta el pipeline completo y devuelve sus métricas.
 
     Args:
         args: Argumentos de configuración del pipeline.
         on_record: Callback opcional invocado tras cada imagen procesada.
+        metrics: Colector externo a reutilizar; se crea uno si es None.
+        benchmark: True para procesar cada imagen en CPU y GPU.
 
     Returns:
-        Tupla con el colector, el tiempo total en segundos y el
-        backend usado.
+        Tupla con el colector, el tiempo total en segundos y el backend.
     """
-    backend = get_backend()
-    metrics = MetricsCollector()
-    input_queue = ImageQueue(args.queue_size)
-    result_queue = ImageQueue(args.queue_size)
-    
-    io_queue = None
-    image_saver = None
-    if not args.no_save:
-        os.makedirs(args.output_dir, exist_ok=True)
-        io_queue = ImageQueue(10)
-        image_saver = ImageSaver(io_queue, args.output_dir)
-        image_saver.start()
-
+    metrics = metrics or MetricsCollector()
+    backend, bench_b, bench_lbl = _make_benchmark_backends(benchmark)
+    io_queue, saver = _setup_io(args)
     paths = scan_folder(args.input_dir)
-    aggregator = ResultAggregator(result_queue, metrics, len(paths), on_record)
+    metrics.set_total_count(len(paths))
+    recs_per = BENCHMARK_RECORDS_PER_IMAGE if bench_b is not None else 1
+    input_q, result_q = ImageQueue(args.queue_size), ImageQueue(args.queue_size)
+    aggregator = ResultAggregator(
+        result_q, metrics, len(paths), on_record, recs_per)
     aggregator.start()
     start = time.perf_counter()
-    _process_images(args, backend, input_queue, result_queue, paths, io_queue)
-    result_queue.put(None)
+    _process_images(
+        args, backend, input_q, result_q, paths, io_queue, bench_b, bench_lbl)
+    result_q.put(None)
     aggregator.join()
-    
-    if io_queue is not None:
-        io_queue.put(None)
-    if image_saver is not None:
-        image_saver.join()
-        
+    _teardown_io(io_queue, saver)
     return metrics, time.perf_counter() - start, backend
 
 
