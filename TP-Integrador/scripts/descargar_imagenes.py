@@ -26,10 +26,10 @@ def parse_args() -> argparse.Namespace:
         '-d', '--dest', type=str, default=DEFAULT_DEST,
         help='ruta de destino (default: %(default)s)')
     parser.add_argument(
-        '-w', '--width', type=int, default=IMAGE_WIDTH,
+        '-W', '--width', type=int, default=IMAGE_WIDTH,
         help='ancho de las imágenes en píxeles (default: %(default)s)')
     parser.add_argument(
-        '-h', '--height', type=int, default=IMAGE_HEIGHT,
+        '-H', '--height', type=int, default=IMAGE_HEIGHT,
         help='alto de las imágenes en píxeles (default: %(default)s)')
     return parser.parse_args()
 
