@@ -6,12 +6,16 @@ import logging
 import os
 import threading
 import time
+from typing import TYPE_CHECKING
 
 import cv2
 
 from core.backend.base import GPUBackend
 from core.metrics import CPU_FALLBACK_BACKEND
 from core.queue_manager import ImageQueue
+
+if TYPE_CHECKING:
+    from pipeline.gpu_batcher import GpuBatcher
 
 try:
     from core.backend.cuda import _COMPUTE_TLS as _GPU_COMPUTE_TLS
@@ -46,6 +50,7 @@ class ProcessingWorker:
         io_queue: ImageQueue | None = None,
         bench_backend: GPUBackend | None = None,
         bench_label: str | None = None,
+        batcher: GpuBatcher | None = None,
     ) -> None:
         """Inicializa el worker con sus colas, backend y operación.
 
@@ -58,6 +63,7 @@ class ProcessingWorker:
             io_queue: Cola de guardado de imágenes (opcional).
             bench_backend: Backend secundario para benchmark (opcional).
             bench_label: Etiqueta del backend de benchmark (opcional).
+            batcher: Acumulador GPU para batching (reemplaza bench_backend).
         """
         self._input_queue = input_queue
         self._result_queue = result_queue
@@ -67,6 +73,7 @@ class ProcessingWorker:
         self._io_queue = io_queue
         self._bench_backend = bench_backend
         self._bench_label = bench_label
+        self._batcher = batcher
         if hasattr(backend, '_on_fallback'):
             backend._on_fallback = _mark_fallback
 
@@ -139,4 +146,11 @@ class ProcessingWorker:
         if self._io_queue is not None:
             self._io_queue.put((name, self._operation, processed))
         self._result_queue.put((name, label, self._operation, elapsed_ms))
-        self._enqueue_bench(image, name)
+        self._dispatch_bench(image, name)
+
+    def _dispatch_bench(self, image: object, name: str) -> None:
+        """Enruta el benchmark al batcher (lote) o al path per-imagen."""
+        if self._batcher is not None:
+            self._batcher.add(name, image)
+        else:
+            self._enqueue_bench(image, name)

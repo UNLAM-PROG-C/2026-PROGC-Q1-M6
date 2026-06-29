@@ -16,6 +16,7 @@ from core.backend.base import (
     GPUBackend,
     CUDA_BACKEND_NAME,
     MAX_PIXEL_VALUE,
+    NO_BATCH_TIME,
     VALID_OPERATIONS,
     BLUR_RADIUS,
     GAUSSIAN_BLUR_WEIGHTS_1D,
@@ -222,6 +223,111 @@ class CUDABackend(GPUBackend):
         _shape = (WARMUP_IMAGE_SIZE, WARMUP_IMAGE_SIZE, RGB_CHANNELS)
         dummy = np.zeros(_shape, dtype=np.uint8)
         self.process(dummy, operation)
+        self.process_batch([dummy, dummy], operation)
+
+    def process_batch(
+        self,
+        images: list[np.ndarray],
+        operation: str,
+    ) -> tuple[list[np.ndarray], float | None]:
+        """Procesa el lote en una sola transferencia PCIe H2D y D2H.
+
+        Args:
+            images: Lista de arrays del mismo shape, dtype uint8.
+            operation: Transformación a aplicar. Valores: VALID_OPERATIONS.
+
+        Returns:
+            Tupla (resultados, per_image_ms) con tiempo amortizado por imagen.
+        """
+        with _gpu_semaphore:
+            try:
+                start = time.perf_counter()
+                results = self._dispatch_batch(images, operation)
+                ms = (time.perf_counter() - start) * _MS_PER_SECOND
+                return results, ms / len(images)
+            except _GPU_OOM_ERRORS as exc:
+                self._handle_oom(images[0], exc)
+                fallback = [self._cpu_fallback.process(img, operation)
+                            for img in images]
+                return fallback, NO_BATCH_TIME
+
+    def _dispatch_batch(
+        self,
+        images: list[np.ndarray],
+        operation: str,
+    ) -> list[np.ndarray]:
+        """Enruta el lote al helper correspondiente a la operación."""
+        if operation == 'blur':
+            return self._batch_blur(images)
+        if operation == 'equalize':
+            return self._batch_equalize(images)
+        return self._batch_simple(images, operation)
+
+    def _batch_simple(
+        self,
+        images: list[np.ndarray],
+        operation: str,
+    ) -> list[np.ndarray]:
+        """Ejecuta grayscale/edges en lote con una sola copia D2H."""
+        imgs = ([_to_grayscale(img) for img in images]
+                if operation == 'edges' else images)
+        d_in = cuda.to_device(np.ascontiguousarray(np.stack(imgs)))
+        h, w = imgs[0].shape[0], imgs[0].shape[1]
+        d_out = cuda.device_array((len(imgs), h, w), dtype=np.uint8)
+        blocks, threads = self._get_grid_dims(imgs[0].shape)
+        for i in range(len(imgs)):
+            _OPERATIONS_CUDA[operation][blocks, threads](d_in[i], d_out[i])
+        cuda.synchronize()
+        host = d_out.copy_to_host()
+        return [host[i] for i in range(len(imgs))]
+
+    def _batch_blur(self, images: list[np.ndarray]) -> list[np.ndarray]:
+        """Aplica desenfoque gaussiano en lote con una sola copia D2H."""
+        stacked = np.ascontiguousarray(np.stack(images))
+        n, h, w, c = stacked.shape
+        d_in = cuda.to_device(stacked)
+        d_out = cuda.device_array((n, h, w, c), dtype=np.uint8)
+        d_mask = cuda.to_device(_gaussian_mask())
+        blocks, threads = self._get_grid_dims(images[0].shape)
+        for i in range(n):
+            # pylint: disable-next=possibly-used-before-assignment
+            _blur_kernel[blocks, threads](d_in[i], d_out[i], d_mask, BLUR_RADIUS)
+        cuda.synchronize()
+        host = d_out.copy_to_host()
+        return [host[i] for i in range(n)]
+
+    def _compute_batch_luts(
+        self,
+        d_grays,
+        grays: list[np.ndarray],
+    ) -> list[np.ndarray]:
+        """Calcula la LUT de ecualización de cada imagen en GPU."""
+        luts = []
+        blocks, threads = self._get_grid_dims(grays[0].shape)
+        for i, gray in enumerate(grays):
+            d_hist = cuda.to_device(np.zeros(HISTOGRAM_BINS, dtype=np.int32))
+            # pylint: disable-next=possibly-used-before-assignment
+            _histogram_kernel[blocks, threads](d_grays[i], d_hist)
+            cuda.synchronize()
+            luts.append(compute_equalize_lut(d_hist.copy_to_host()))
+        return luts
+
+    def _batch_equalize(self, images: list[np.ndarray]) -> list[np.ndarray]:
+        """Ecualiza histograma en lote; D2H final agrupa toda la salida."""
+        grays = [_to_grayscale(img) for img in images]
+        stacked_g = np.ascontiguousarray(np.stack(grays))
+        d_grays = cuda.to_device(stacked_g)
+        luts = self._compute_batch_luts(d_grays, grays)
+        d_luts = cuda.to_device(np.ascontiguousarray(np.stack(luts)))
+        n, h, w = stacked_g.shape
+        d_out = cuda.device_array((n, h, w), dtype=np.uint8)
+        blocks, threads = self._get_grid_dims(grays[0].shape)
+        for i in range(n):
+            # pylint: disable-next=possibly-used-before-assignment
+            _map_kernel[blocks, threads](d_grays[i], d_luts[i], d_out[i])
+        cuda.synchronize()
+        host = d_out.copy_to_host()
+        return [host[i] for i in range(n)]
 
     def _handle_oom(self, image: np.ndarray, exc: Exception) -> None:
         """Loggea el OOM de GPU y notifica el fallback configurado."""

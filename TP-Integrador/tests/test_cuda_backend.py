@@ -86,6 +86,40 @@ def test_cuda_process_invalid_operation():
                 backend.process(
                     np.zeros((10, 10, 3), dtype=np.uint8), "invalid_op")
 
+def test_base_process_batch_default_returns_no_batch_time():
+    """GPUBackend.process_batch default devuelve NO_BATCH_TIME."""
+    from core.backend.base import NO_BATCH_TIME
+    from core.backend.cpu import CPUBackend
+    imgs = [np.zeros((5, 5, 3), dtype=np.uint8)] * 2
+    results, per_ms = CPUBackend().process_batch(imgs, 'grayscale')
+    assert len(results) == 2
+    assert per_ms is NO_BATCH_TIME
+
+
+def test_cuda_process_batch_signature():
+    """CUDABackend.process_batch tiene la firma correcta."""
+    import inspect
+    sig = inspect.signature(CUDABackend.process_batch)
+    assert 'images' in sig.parameters
+    assert 'operation' in sig.parameters
+
+
+def test_cuda_process_batch_on_hardware(test_image):
+    """En hardware real, process_batch produce el mismo resultado que process."""
+    if not HAS_CUDA_HARDWARE:
+        pytest.skip('No CUDA hardware disponible')
+    backend = CUDABackend()
+    try:
+        expected = backend.process(test_image, 'grayscale')
+        results, per_ms = backend.process_batch(
+            [test_image, test_image], 'grayscale')
+    except NvvmSupportError:
+        pytest.skip('No GPU compute capabilities found')
+    np.testing.assert_array_equal(expected, results[0])
+    np.testing.assert_array_equal(expected, results[1])
+    assert per_ms is not None and per_ms >= 0
+
+
 def test_cuda_memory_not_leaked(test_image):
     # This test is always mocked to specifically check if copy_to_host was called
     with patch('core.backend.cuda.cuda.get_current_device'), \
