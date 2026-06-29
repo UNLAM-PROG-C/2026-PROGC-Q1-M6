@@ -15,6 +15,8 @@ from concurrent.futures import ThreadPoolExecutor
 import subprocess
 import sys
 import shutil
+import socket
+import webbrowser
 
 from core.backend import VALID_OPERATIONS, CPUBackend, get_backend
 from core.metrics import CPU_BACKEND, MetricsCollector
@@ -28,6 +30,10 @@ from typing import Any
 
 _LOG_FORMAT: str = '[%(levelname)s] %(message)s'
 _SUMMARY_HEADER: str = '\nResumen por operación:'
+FRONTEND_DEV_URL: str = 'http://localhost:5173'
+FRONTEND_DIR: str = 'frontend'
+UVICORN_MODULE: str = 'api.main:app'
+FRONTEND_PORT: int = 5173
 
 
 def _parse_args() -> argparse.Namespace:
@@ -52,33 +58,64 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _start_dashboard_processes() -> list[subprocess.Popen]:
-    """Inicia uvicorn (API) y el dev server del frontend en background.
-
-    Devuelve la lista de procesos lanzados (puede estar vacía si faltan binarios).
-    """
-    procs: list[subprocess.Popen] = []
-    # Start uvicorn using the current Python executable
+def _start_uvicorn() -> subprocess.Popen | None:
+    """Inicia uvicorn como subproceso y devuelve el proceso o None."""
     try:
-        uvicorn_cmd = [sys.executable, '-m', 'uvicorn', 'api.main:app', '--reload']
-        proc = subprocess.Popen(uvicorn_cmd)
-        procs.append(proc)
-        logging.info('uvicorn iniciado (pid=%s)', proc.pid)
-    except Exception:
-        logging.exception('No se pudo iniciar uvicorn como subproceso')
+        cmd = [sys.executable, '-m', 'uvicorn', UVICORN_MODULE, '--reload']
+        p = subprocess.Popen(cmd)
+        logging.info('uvicorn iniciado (pid=%s)', p.pid)
+        return p
+    except OSError:
+        logging.exception('No se pudo iniciar uvicorn')
+        return None
 
-    # Start frontend dev server if npm is available
-    if shutil.which('npm'):
+
+def _open_url_when_ready(url: str, timeout: int = 60) -> None:
+    """Abre `url` en el navegador cuando el puerto responda (timeout segundos)."""
+    host = 'localhost'
+    port = FRONTEND_PORT
+    end = time.time() + timeout
+    while time.time() < end:
         try:
-            npm_cmd = ['npm', 'run', 'dev']
-            proc_front = subprocess.Popen(npm_cmd, cwd=os.path.join(os.getcwd(), 'frontend'))
-            procs.append(proc_front)
-            logging.info('Frontend dev server iniciado (pid=%s)', proc_front.pid)
-        except Exception:
-            logging.exception('No se pudo iniciar el dev server del frontend')
-    else:
-        logging.warning('npm no encontrado en PATH; frontend no iniciado')
+            with socket.create_connection((host, port), timeout=1):
+                webbrowser.open(url)
+                return
+        except OSError:
+            time.sleep(0.5)
 
+
+def _start_frontend() -> subprocess.Popen | None:
+    """Inicia `npm run dev` en el directorio del frontend y abre el URL."""
+    npm_path = shutil.which('npm')
+    if npm_path is None:
+        logging.warning('npm no encontrado en PATH; frontend no iniciado')
+        return None
+    try:
+        cmd = [npm_path, 'run', 'dev']
+        p = subprocess.Popen(cmd, cwd=os.path.join(os.getcwd(), FRONTEND_DIR))
+        logging.info('Frontend dev iniciado (pid=%s)', p.pid)
+        _open_url_when_ready(FRONTEND_DEV_URL)
+        return p
+    except FileNotFoundError:
+        logging.error('npm no encontrado en el sistema: %s', npm_path)
+        logging.info('Inicia manualmente el frontend: cd %s && npm install && npm run dev',
+                     FRONTEND_DIR)
+        return None
+    except OSError:
+        logging.exception('No se pudo iniciar el dev server del frontend')
+        logging.info('Inicia manualmente el frontend: cd %s && npm install && npm run dev',
+                     FRONTEND_DIR)
+        return None
+
+
+def _start_dashboard_processes() -> list[subprocess.Popen]:
+    procs: list[subprocess.Popen] = []
+    p = _start_uvicorn()
+    if p is not None:
+        procs.append(p)
+    f = _start_frontend()
+    if f is not None:
+        procs.append(f)
     return procs
 
 
@@ -145,11 +182,12 @@ class Dashboard:
         self.on_start: Callable[[argparse.Namespace], Any] | None = None
 
     def run(self, cfg: argparse.Namespace) -> None:
-        logging.info(f'Backend activo: {type(self.backend).__name__} - {self.backend.device_info}')
+        logging.info('Backend activo: %s - %s', type(self.backend).__name__,
+                     self.backend.device_info)
         logging.info('Presione ENTER para iniciar el pipeline, o Q + ENTER para salir')
         choice = input().strip().lower()
         if choice == 'q':
-            logging.exception('Cancelado por el usuario')
+            logging.info('Cancelado por el usuario')
             return
         if self.on_start is not None:
             self.on_start(cfg)
@@ -195,16 +233,12 @@ def _run_pipeline(
         logging.info('Interrupción recibida: iniciando shutdown limpio')
         # notify workers to stop by sending sentinels
         for _ in range(args.workers):
-            try:
-                input_queue.put(None)
-            except Exception:
-                pass
-        executor.shutdown(wait=False, cancel_futures=True)
-        # log current metrics snapshot
+            input_queue.put(None)
         try:
-            logging.info('Estado al cierre: %s', metrics.get_live_stats())
-        except Exception:
-            logging.exception('No se pudo obtener el estado de métricas')
+            executor.shutdown(wait=False, cancel_futures=True)
+        except TypeError:
+            executor.shutdown(wait=False)
+        logging.info('Estado al cierre: %s', metrics.get_live_stats())
         raise
     finally:
         result_queue.put(None)
@@ -242,10 +276,9 @@ def _print_summary(
     summary = metrics.get_summary()
     total = sum(stats['count'] for stats in summary.values())
     throughput = metrics.get_throughput(total_seconds)
-    logging.info(f'[INFO] Backend activo: {backend_name}')
-    logging.info(
-        f'[INFO] Procesadas {total} imágenes en '
-        f'{total_seconds:.2f} s ({throughput:.2f} img/s)')
+    logging.info('[INFO] Backend activo: %s', backend_name)
+    logging.info('[INFO] Procesadas %d imágenes en %.2f s (%.2f img/s)',
+                    total, total_seconds, throughput)
     logging.info(_SUMMARY_HEADER)
     for operation, stats in summary.items():
         logging.info(_format_operation(operation, stats))
@@ -265,7 +298,7 @@ def main() -> None:
         from api.progress_hub import hub as progress_hub
 
         hub = progress_hub
-    except Exception:
+    except ImportError:
         hub = None
 
     if hub is not None:
@@ -312,7 +345,7 @@ def main() -> None:
         _print_summary(metrics, float(total_seconds), type(backend).__name__)
         if cfg.report:
             export_csv(metrics, cfg.report)
-            print(f'[INFO] Reporte CSV escrito en {cfg.report}')
+            logging.info('Reporte CSV escrito en %s', cfg.report)
 
     dashboard.on_start = _start_handler
 
@@ -333,10 +366,15 @@ def main() -> None:
                 logging.info('Terminando proceso pid=%s', p.pid)
                 p.terminate()
                 p.wait(timeout=3)
-            except Exception:
+            except subprocess.TimeoutExpired:
                 try:
                     p.kill()
-                except Exception:
+                except OSError:
+                    pass
+            except OSError:
+                try:
+                    p.kill()
+                except OSError:
                     pass
 
 
