@@ -8,6 +8,7 @@ const config: Config = {
     container: { center: true, padding: "2rem" },
     extend: {
       fontFamily: {
+        sans: ["Inter", "sans-serif"],
         mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
       },
       colors: {
