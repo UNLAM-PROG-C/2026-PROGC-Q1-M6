@@ -2,4 +2,6 @@ node_modules/
 dist/
 .vite/
 *.local
+# URL efímera de ngrok del backend en Colab (ya cubierto por *.local)
+.env.local
 *.tsbuildinfo

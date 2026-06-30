@@ -21,6 +21,7 @@ from pipeline.image_loader import enqueue_paths, scan_folder
 from pipeline.image_saver import ImageSaver
 from pipeline.report_exporter import export_csv
 from pipeline.result_aggregator import ResultAggregator
+from pipeline.gpu_batcher import GpuBatcher
 from pipeline.worker import MAX_WORKER_THREADS, ProcessingWorker
 
 _LOG_FORMAT: str = '[%(levelname)s] %(message)s'
@@ -107,6 +108,33 @@ def _make_benchmark_backends(
     return CPUBackend(), gpu, GPU_BACKEND
 
 
+def _warmup_backend(backend: GPUBackend | None, operation: str) -> None:
+    """Llama a warmup() en el backend si está disponible."""
+    if backend is None:
+        return
+    warmup_fn = getattr(backend, 'warmup', None)
+    if warmup_fn is not None:
+        warmup_fn(operation)
+
+
+def _submit_workers(
+    executor: ThreadPoolExecutor,
+    input_queue: ImageQueue,
+    result_queue: ImageQueue,
+    backend: GPUBackend,
+    args: argparse.Namespace,
+    io_queue: ImageQueue | None,
+    batcher: GpuBatcher | None,
+) -> None:
+    """Crea y registra los workers en el executor."""
+    for _ in range(args.workers):
+        worker = ProcessingWorker(
+            input_queue, result_queue, backend, args.operation,
+            backend_label=CPU_BACKEND, io_queue=io_queue,
+            batcher=batcher)
+        executor.submit(worker.run)
+
+
 def _process_images(
     args: argparse.Namespace,
     backend: GPUBackend,
@@ -119,6 +147,10 @@ def _process_images(
 ) -> None:
     """Lanza los workers en un pool y encola las rutas a procesar.
 
+    Crea un GpuBatcher compartido cuando hay bench_backend GPU; los workers
+    alimentan el batcher en vez de cronometrar GPU por imagen. flush_all()
+    se llama tras el shutdown para procesar los lotes parciales finales.
+
     Args:
         args: Argumentos de configuración del pipeline.
         backend: Backend principal de procesamiento.
@@ -129,15 +161,20 @@ def _process_images(
         bench_backend: Backend secundario para benchmark (opcional).
         bench_label: Etiqueta del bench_backend (opcional).
     """
+    batcher = (
+        GpuBatcher(result_queue, bench_backend, bench_label or '', args.operation)
+        if bench_backend else None
+    )
+    _warmup_backend(backend, args.operation)
+    if batcher is not None:
+        batcher.warmup(args.operation)
     executor = ThreadPoolExecutor(max_workers=args.workers)
-    for _ in range(args.workers):
-        worker = ProcessingWorker(
-            input_queue, result_queue, backend, args.operation,
-            backend_label=CPU_BACKEND, io_queue=io_queue,
-            bench_backend=bench_backend, bench_label=bench_label)
-        executor.submit(worker.run)
+    _submit_workers(
+        executor, input_queue, result_queue, backend, args, io_queue, batcher)
     enqueue_paths(paths, input_queue, args.workers)
     executor.shutdown(wait=True)
+    if batcher is not None:
+        batcher.flush_all()
 
 
 def _run_pipeline(

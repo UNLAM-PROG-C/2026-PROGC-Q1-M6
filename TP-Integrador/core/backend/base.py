@@ -57,6 +57,8 @@ CUDA_BACKEND_NAME = "CUDA"
 OPENCL_BACKEND_NAME = "OpenCL"
 
 MAX_GPU_CONCURRENT_BATCHES: int = 2
+MAX_GPU_BATCH_SIZE: int = 32
+NO_BATCH_TIME: float | None = None
 _gpu_semaphore = threading.Semaphore(MAX_GPU_CONCURRENT_BATCHES)
 
 
@@ -69,3 +71,21 @@ class GPUBackend(abc.ABC):
     @abc.abstractmethod
     def process(self, image: np.ndarray, operation: str) -> np.ndarray:
         """Aplica ``operation`` a ``image`` y devuelve el resultado."""
+
+    def process_batch(
+        self,
+        images: list[np.ndarray],
+        operation: str,
+    ) -> tuple[list[np.ndarray], float | None]:
+        """Procesa un lote de imágenes del mismo shape.
+
+        Args:
+            images: Lista de arrays del mismo shape, dtype uint8.
+            operation: Transformación a aplicar. Valores: VALID_OPERATIONS.
+
+        Returns:
+            Tupla (resultados, per_image_ms). Devuelve NO_BATCH_TIME si el
+            backend no amortiza el lote; los backends GPU lo sobreescriben.
+        """
+        results = [self.process(img, operation) for img in images]
+        return results, NO_BATCH_TIME

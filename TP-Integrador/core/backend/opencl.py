@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 
 import numpy as np
@@ -16,6 +17,7 @@ import numpy as np
 from core.backend.base import (
     GPUBackend,
     OPENCL_BACKEND_NAME,
+    NO_BATCH_TIME,
     _gpu_semaphore,
     MAX_PIXEL_VALUE,
     VALID_OPERATIONS,
@@ -25,6 +27,8 @@ from core.backend.base import (
     HISTOGRAM_BINS,
     compute_equalize_lut,
 )
+
+_MS_PER_SECOND: float = 1000.0
 from core.backend.cpu import CPUBackend, _to_grayscale
 
 try:
@@ -271,6 +275,155 @@ class OpenCLBackend(GPUBackend):
         histogram = self._compute_histogram(gray)
         lut = compute_equalize_lut(histogram)
         return self._apply_lut(gray, lut)
+
+    def process_batch(
+        self,
+        images: list[np.ndarray],
+        operation: str,
+    ) -> tuple[list[np.ndarray], float | None]:
+        """Procesa el lote en una sola transferencia PCIe H2D y D2H.
+
+        Args:
+            images: Lista de arrays del mismo shape, dtype uint8.
+            operation: Transformación a aplicar. Valores: VALID_OPERATIONS.
+
+        Returns:
+            Tupla (resultados, per_image_ms) con tiempo amortizado por imagen.
+        """
+        with _gpu_semaphore:
+            try:
+                start = time.perf_counter()
+                results = self._dispatch_batch_cl(images, operation)
+                ms = (time.perf_counter() - start) * _MS_PER_SECOND
+                return results, ms / len(images)
+            except _GPU_OOM_ERRORS as exc:
+                self._handle_oom(images[0], exc)
+                fallback = [self._cpu_fallback.process(img, operation)
+                            for img in images]
+                return fallback, NO_BATCH_TIME
+
+    def _dispatch_batch_cl(
+        self,
+        images: list[np.ndarray],
+        operation: str,
+    ) -> list[np.ndarray]:
+        """Enruta el lote al helper correspondiente a la operación."""
+        if operation == 'blur':
+            return self._batch_blur_cl(images)
+        if operation == 'equalize':
+            return self._batch_equalize_cl(images)
+        return self._batch_simple_cl(images, operation)
+
+    def _make_batch_buffers(
+        self,
+        stacked_in: np.ndarray,
+        out_nbytes: int,
+    ) -> tuple:
+        """Crea un buffer READ con el lote y un buffer WRITE para la salida."""
+        mf = cl.mem_flags
+        buf_in = cl.Buffer(
+            self.ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=stacked_in)
+        buf_out = cl.Buffer(self.ctx, mf.WRITE_ONLY, out_nbytes)
+        return buf_in, buf_out
+
+    def _enqueue_simple_kernels(
+        self,
+        buf_in,
+        buf_out,
+        imgs: list[np.ndarray],
+        operation: str,
+        h: int,
+        w: int,
+    ) -> None:
+        """Lanza el kernel simple sobre sub-buffers de cada imagen del lote."""
+        in_stride = imgs[0].nbytes
+        out_stride = h * w
+        kernel_fn = getattr(self.program, _OPERATIONS_OPENCL[operation])
+        for i in range(len(imgs)):
+            sub_in = buf_in.get_sub_region(i * in_stride, in_stride)
+            sub_out = buf_out.get_sub_region(i * out_stride, out_stride)
+            kernel_fn(
+                self.queue, (h, w), None,
+                sub_in, sub_out, np.int32(h), np.int32(w))
+
+    def _batch_simple_cl(
+        self,
+        images: list[np.ndarray],
+        operation: str,
+    ) -> list[np.ndarray]:
+        """Ejecuta grayscale/edges en lote con una sola copia D2H."""
+        imgs = ([_to_grayscale(img) for img in images]
+                if operation == 'edges' else images)
+        n, h, w = len(imgs), imgs[0].shape[0], imgs[0].shape[1]
+        stacked_in = np.ascontiguousarray(np.stack(imgs))
+        host_out = np.zeros((n, h, w), dtype=np.uint8)
+        buf_in, buf_out = self._make_batch_buffers(stacked_in, host_out.nbytes)
+        self._enqueue_simple_kernels(buf_in, buf_out, imgs, operation, h, w)
+        cl.enqueue_copy(self.queue, host_out, buf_out).wait()
+        return [host_out[i] for i in range(n)]
+
+    def _batch_blur_cl(self, images: list[np.ndarray]) -> list[np.ndarray]:
+        """Aplica desenfoque gaussiano en lote con una sola copia D2H."""
+        stacked_in = np.ascontiguousarray(np.stack(images))
+        n, h, w, c = stacked_in.shape
+        host_out = np.zeros_like(stacked_in)
+        buf_in, buf_out = self._make_batch_buffers(stacked_in, host_out.nbytes)
+        stride = h * w * c
+        for i in range(n):
+            sub_in = buf_in.get_sub_region(i * stride, stride)
+            sub_out = buf_out.get_sub_region(i * stride, stride)
+            self.program.blur(
+                self.queue, (h, w), None,
+                sub_in, sub_out, np.int32(h), np.int32(w))
+        cl.enqueue_copy(self.queue, host_out, buf_out).wait()
+        return [host_out[i] for i in range(n)]
+
+    def _compute_batch_luts_cl(
+        self,
+        stacked_g: np.ndarray,
+        n: int,
+    ) -> list[np.ndarray]:
+        """Calcula la LUT de ecualización de cada imagen del lote."""
+        return [
+            compute_equalize_lut(self._compute_histogram(stacked_g[i]))
+            for i in range(n)
+        ]
+
+    def _enqueue_equalize_kernels(
+        self,
+        buf_g,
+        buf_l,
+        buf_o,
+        n: int,
+        h: int,
+        w: int,
+    ) -> None:
+        """Lanza map_lut sobre sub-buffers de grises, LUTs y salida."""
+        lut_stride = HISTOGRAM_BINS
+        for i in range(n):
+            sub_g = buf_g.get_sub_region(i * h * w, h * w)
+            sub_l = buf_l.get_sub_region(i * lut_stride, lut_stride)
+            sub_o = buf_o.get_sub_region(i * h * w, h * w)
+            self.program.map_lut(
+                self.queue, (h, w), None,
+                sub_g, sub_l, sub_o, np.int32(h), np.int32(w))
+
+    def _batch_equalize_cl(
+        self,
+        images: list[np.ndarray],
+    ) -> list[np.ndarray]:
+        """Ecualiza histograma en lote; D2H final agrupa toda la salida."""
+        grays = [_to_grayscale(img) for img in images]
+        stacked_g = np.ascontiguousarray(np.stack(grays))
+        n, h, w = stacked_g.shape
+        luts = self._compute_batch_luts_cl(stacked_g, n)
+        stacked_l = np.ascontiguousarray(np.stack(luts))
+        host_out = np.zeros((n, h, w), dtype=np.uint8)
+        buf_g, buf_o = self._make_batch_buffers(stacked_g, host_out.nbytes)
+        buf_l = self._read_buffer(stacked_l)
+        self._enqueue_equalize_kernels(buf_g, buf_l, buf_o, n, h, w)
+        cl.enqueue_copy(self.queue, host_out, buf_o).wait()
+        return [host_out[i] for i in range(n)]
 
     def _read_buffer(self, host: np.ndarray):
         """Crea un buffer de solo lectura copiando ``host`` a la GPU."""
