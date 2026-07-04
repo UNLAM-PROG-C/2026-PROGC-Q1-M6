@@ -267,6 +267,7 @@ Resumen por operación:
 > 📸 _Captura sugerida:_ la terminal con el resumen final del procesamiento CLI.
 >
 > ![Ejecución por CLI](images/manual/11-cli.png)
+> ![Ejecución por CLI](images/manual/12-cli.png)
 
 ---
 
