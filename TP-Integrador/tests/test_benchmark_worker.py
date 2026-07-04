@@ -9,10 +9,12 @@ import cv2
 from core.backend.cpu import CPUBackend
 from core.metrics import CPU_BACKEND
 from core.queue_manager import ImageQueue
+from pipeline.gpu_batcher import GpuBatcher
 from pipeline.worker import ProcessingWorker
 
 OPERATION = 'blur'
 BENCH_LABEL = 'gpu'
+FAKE_BATCH_MS = 1.0
 
 
 class _FakeGPUBackend:
@@ -24,6 +26,10 @@ class _FakeGPUBackend:
     def process(self, image, operation):
         """Devuelve la imagen sin modificarla."""
         return image
+
+    def process_batch(self, images, operation):
+        """Devuelve las imágenes sin modificar y un tiempo fijo por lote."""
+        return list(images), FAKE_BATCH_MS
 
 
 @pytest.fixture(name='result_queue')
@@ -40,15 +46,19 @@ def _fake_image_path(tmp_path):
 
 
 def test_benchmark_worker_emits_two_records(result_queue, fake_image_path):
-    """En modo benchmark, _process_one emite un record cpu y uno gpu."""
+    """Primario GPU (batcher) + bench CPU emiten un record gpu y uno cpu."""
     input_q = ImageQueue(10)
+    fake_gpu = _FakeGPUBackend()
+    batcher = GpuBatcher(result_queue, fake_gpu, BENCH_LABEL, OPERATION)
     worker = ProcessingWorker(
-        input_q, result_queue, CPUBackend(), OPERATION,
-        backend_label=CPU_BACKEND,
-        bench_backend=_FakeGPUBackend(),
-        bench_label=BENCH_LABEL,
+        input_q, result_queue, fake_gpu, OPERATION,
+        backend_label=BENCH_LABEL,
+        bench_backend=CPUBackend(),
+        bench_label=CPU_BACKEND,
+        batcher=batcher,
     )
     worker._process_one(fake_image_path)
+    batcher.flush_all()
     records = []
     while not result_queue.empty():
         records.append(result_queue.get())

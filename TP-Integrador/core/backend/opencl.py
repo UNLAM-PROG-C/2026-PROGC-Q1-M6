@@ -30,6 +30,7 @@ from core.backend.base import (
 
 _MS_PER_SECOND: float = 1000.0
 from core.backend.cpu import CPUBackend, _to_grayscale
+from core.backend.cuda import WARMUP_IMAGE_SIZE
 
 try:
     import pyopencl as cl
@@ -160,6 +161,125 @@ if _OPENCL_AVAILABLE:
             output[x * cols + y] = lut[gray[x * cols + y]];
         }}
     }}
+
+    __kernel void grayscale_batch(
+        __global const unsigned char* images,
+        __global unsigned char* output,
+        const int rows,
+        const int cols)
+    {{
+        int n = get_global_id(0);
+        int x = get_global_id(1);
+        int y = get_global_id(2);
+
+        if (x < rows && y < cols) {{
+            int in_idx = ((n * rows + x) * cols + y) * {OPENCL_IMAGE_CHANNELS};
+            int out_idx = (n * rows + x) * cols + y;
+
+            float r = (float)images[in_idx];
+            float g = (float)images[in_idx + 1];
+            float b = (float)images[in_idx + 2];
+
+            output[out_idx] = (unsigned char)(
+                {OPENCL_GRAYSCALE_RED_WEIGHT}f * r +
+                {OPENCL_GRAYSCALE_GREEN_WEIGHT}f * g +
+                {OPENCL_GRAYSCALE_BLUE_WEIGHT}f * b
+            );
+        }}
+    }}
+
+    __kernel void edges_batch(
+        __global const unsigned char* grays,
+        __global unsigned char* output,
+        const int rows,
+        const int cols)
+    {{
+        int n = get_global_id(0);
+        int x = get_global_id(1);
+        int y = get_global_id(2);
+
+        if (x >= {OPENCL_EDGE_MARGIN} && x < rows - {OPENCL_EDGE_MARGIN} && y >= {OPENCL_EDGE_MARGIN} && y < cols - {OPENCL_EDGE_MARGIN}) {{
+            int base = n * rows * cols;
+            float gx =
+                -(float)grays[base + (x-{OPENCL_EDGE_MARGIN})*cols + (y-{OPENCL_EDGE_MARGIN})] + (float)grays[base + (x-{OPENCL_EDGE_MARGIN})*cols + (y+{OPENCL_EDGE_MARGIN})]
+                -{OPENCL_SOBEL_WEIGHT}f * (float)grays[base + x*cols + (y-{OPENCL_EDGE_MARGIN})] + {OPENCL_SOBEL_WEIGHT}f * (float)grays[base + x*cols + (y+{OPENCL_EDGE_MARGIN})]
+                -(float)grays[base + (x+{OPENCL_EDGE_MARGIN})*cols + (y-{OPENCL_EDGE_MARGIN})] + (float)grays[base + (x+{OPENCL_EDGE_MARGIN})*cols + (y+{OPENCL_EDGE_MARGIN})];
+
+            float gy =
+                -(float)grays[base + (x-{OPENCL_EDGE_MARGIN})*cols + (y-{OPENCL_EDGE_MARGIN})] - {OPENCL_SOBEL_WEIGHT}f * (float)grays[base + (x-{OPENCL_EDGE_MARGIN})*cols + y] - (float)grays[base + (x-{OPENCL_EDGE_MARGIN})*cols + (y+{OPENCL_EDGE_MARGIN})]
+                +(float)grays[base + (x+{OPENCL_EDGE_MARGIN})*cols + (y-{OPENCL_EDGE_MARGIN})] + {OPENCL_SOBEL_WEIGHT}f * (float)grays[base + (x+{OPENCL_EDGE_MARGIN})*cols + y] + (float)grays[base + (x+{OPENCL_EDGE_MARGIN})*cols + (y+{OPENCL_EDGE_MARGIN})];
+
+            float magnitude = sqrt(gx*gx + gy*gy);
+            if (magnitude > (float){MAX_PIXEL_VALUE}) {{
+                magnitude = (float){MAX_PIXEL_VALUE};
+            }}
+            output[base + x * cols + y] = (unsigned char)magnitude;
+        }}
+    }}
+
+    __kernel void blur_batch(
+        __global const unsigned char* images,
+        __global unsigned char* output,
+        const int rows,
+        const int cols)
+    {{
+        int n = get_global_id(0);
+        int x = get_global_id(1);
+        int y = get_global_id(2);
+        const int radius = {OPENCL_BLUR_RADIUS};
+        const int channels = {OPENCL_IMAGE_CHANNELS};
+        float weights[{BLUR_KERNEL_SIZE}] = {{{_BLUR_WEIGHTS_C}}};
+
+        if (x < rows && y < cols) {{
+            for (int c = 0; c < channels; c++) {{
+                float acc = 0.0f;
+                for (int i = -radius; i <= radius; i++) {{
+                    for (int j = -radius; j <= radius; j++) {{
+                        int px = min(max(x + i, 0), rows - 1);
+                        int py = min(max(y + j, 0), cols - 1);
+                        float w = weights[i + radius] * weights[j + radius];
+                        acc += w * (float)images[
+                            ((n * rows + px) * cols + py) * channels + c];
+                    }}
+                }}
+                output[((n * rows + x) * cols + y) * channels + c] =
+                    (unsigned char)acc;
+            }}
+        }}
+    }}
+
+    __kernel void histogram_batch(
+        __global const unsigned char* grays,
+        __global uint* hist,
+        const int rows,
+        const int cols)
+    {{
+        int n = get_global_id(0);
+        int x = get_global_id(1);
+        int y = get_global_id(2);
+
+        if (x < rows && y < cols) {{
+            int idx = (n * rows + x) * cols + y;
+            atomic_add(&hist[n * {HISTOGRAM_BINS} + grays[idx]], 1);
+        }}
+    }}
+
+    __kernel void map_lut_batch(
+        __global const unsigned char* grays,
+        __global const unsigned char* luts,
+        __global unsigned char* output,
+        const int rows,
+        const int cols)
+    {{
+        int n = get_global_id(0);
+        int x = get_global_id(1);
+        int y = get_global_id(2);
+
+        if (x < rows && y < cols) {{
+            int idx = (n * rows + x) * cols + y;
+            output[idx] = luts[n * {HISTOGRAM_BINS} + grays[idx]];
+        }}
+    }}
     """
     # pylint: enable=line-too-long
 
@@ -167,11 +287,22 @@ if _OPENCL_AVAILABLE:
         'grayscale': 'grayscale',
         'edges': 'edges',
     }
+    _OPERATIONS_OPENCL_BATCH = {
+        'grayscale': 'grayscale_batch',
+        'edges': 'edges_batch',
+    }
+    _KERNEL_NAMES: tuple[str, ...] = (
+        'grayscale', 'edges', 'blur', 'histogram', 'map_lut',
+        'grayscale_batch', 'edges_batch', 'blur_batch',
+        'histogram_batch', 'map_lut_batch',
+    )
     _GPU_OOM_ERRORS: tuple[type[Exception], ...] = (
         MemoryError, cl.MemoryError)
 else:
     _OPENCL_KERNELS_SOURCE = ""
     _OPERATIONS_OPENCL = {}
+    _OPERATIONS_OPENCL_BATCH = {}
+    _KERNEL_NAMES = ()
     _GPU_OOM_ERRORS = (MemoryError,)
 
 
@@ -194,6 +325,9 @@ class OpenCLBackend(GPUBackend):
         self.ctx = cl.Context([device])
         self.queue = cl.CommandQueue(self.ctx)
         self.program = cl.Program(self.ctx, _OPENCL_KERNELS_SOURCE).build()
+        self._kernels = {
+            name: cl.Kernel(self.program, name) for name in _KERNEL_NAMES
+        }
 
     def process(self, image: np.ndarray, operation: str) -> np.ndarray:
         """Aplica la operación a la imagen usando un kernel OpenCL.
@@ -216,6 +350,17 @@ class OpenCLBackend(GPUBackend):
             except _GPU_OOM_ERRORS as exc:
                 self._handle_oom(image, exc)
                 return self._cpu_fallback.process(image, operation)
+
+    def warmup(self, operation: str) -> None:
+        """Ejercita y calienta el camino simple y el camino batch.
+
+        Args:
+            operation: Transformación a ejercitar. Valores: VALID_OPERATIONS.
+        """
+        shape = (WARMUP_IMAGE_SIZE, WARMUP_IMAGE_SIZE, OPENCL_IMAGE_CHANNELS)
+        dummy = np.zeros(shape, dtype=np.uint8)
+        self.process(dummy, operation)
+        self.process_batch([dummy, dummy], operation)
 
     def _handle_oom(self, image: np.ndarray, exc: Exception) -> None:
         """Loggea el OOM de GPU y notifica el fallback configurado."""
@@ -250,7 +395,7 @@ class OpenCLBackend(GPUBackend):
         rows, cols = image.shape[:2]
         output = np.zeros((rows, cols), dtype=np.uint8)
         img_buf, out_buf = self._create_buffers(image, output)
-        kernel_func = getattr(self.program, _OPERATIONS_OPENCL[operation])
+        kernel_func = self._kernels[_OPERATIONS_OPENCL[operation]]
         kernel_func(
             self.queue, (rows, cols), None,
             img_buf, out_buf, np.int32(rows), np.int32(cols))
@@ -263,7 +408,7 @@ class OpenCLBackend(GPUBackend):
         output = np.zeros(
             (rows, cols, OPENCL_IMAGE_CHANNELS), dtype=np.uint8)
         img_buf, out_buf = self._create_buffers(image, output)
-        self.program.blur(
+        self._kernels['blur'](
             self.queue, (rows, cols), None,
             img_buf, out_buf, np.int32(rows), np.int32(cols))
         cl.enqueue_copy(self.queue, output, out_buf).wait()
@@ -326,57 +471,61 @@ class OpenCLBackend(GPUBackend):
         buf_out = cl.Buffer(self.ctx, mf.WRITE_ONLY, out_nbytes)
         return buf_in, buf_out
 
-    def _enqueue_simple_kernels(
-        self,
-        buf_in,
-        buf_out,
-        imgs: list[np.ndarray],
-        operation: str,
-        h: int,
-        w: int,
-    ) -> None:
-        """Lanza el kernel simple sobre sub-buffers de cada imagen del lote."""
-        in_stride = imgs[0].nbytes
-        out_stride = h * w
-        kernel_fn = getattr(self.program, _OPERATIONS_OPENCL[operation])
-        for i in range(len(imgs)):
-            sub_in = buf_in.get_sub_region(i * in_stride, in_stride)
-            sub_out = buf_out.get_sub_region(i * out_stride, out_stride)
-            kernel_fn(
-                self.queue, (h, w), None,
-                sub_in, sub_out, np.int32(h), np.int32(w))
+    def _batch_global_size(
+        self, shape: tuple[int, int], n: int
+    ) -> tuple[int, int, int]:
+        """Calcula el global work size (N, H, W) de un kernel batcheado."""
+        rows, cols = shape
+        return (n, rows, cols)
 
     def _batch_simple_cl(
         self,
         images: list[np.ndarray],
         operation: str,
     ) -> list[np.ndarray]:
-        """Ejecuta grayscale/edges en lote con una sola copia D2H."""
+        """Ejecuta grayscale/edges en lote con un solo kernel 3D."""
         imgs = ([_to_grayscale(img) for img in images]
                 if operation == 'edges' else images)
         n, h, w = len(imgs), imgs[0].shape[0], imgs[0].shape[1]
         stacked_in = np.ascontiguousarray(np.stack(imgs))
         host_out = np.zeros((n, h, w), dtype=np.uint8)
         buf_in, buf_out = self._make_batch_buffers(stacked_in, host_out.nbytes)
-        self._enqueue_simple_kernels(buf_in, buf_out, imgs, operation, h, w)
+        kernel_fn = self._kernels[_OPERATIONS_OPENCL_BATCH[operation]]
+        kernel_fn(
+            self.queue, self._batch_global_size((h, w), n), None,
+            buf_in, buf_out, np.int32(h), np.int32(w))
         cl.enqueue_copy(self.queue, host_out, buf_out).wait()
         return [host_out[i] for i in range(n)]
 
     def _batch_blur_cl(self, images: list[np.ndarray]) -> list[np.ndarray]:
-        """Aplica desenfoque gaussiano en lote con una sola copia D2H."""
+        """Aplica desenfoque gaussiano en lote con un solo kernel 3D."""
         stacked_in = np.ascontiguousarray(np.stack(images))
-        n, h, w, c = stacked_in.shape
+        n, h, w, _ = stacked_in.shape
         host_out = np.zeros_like(stacked_in)
         buf_in, buf_out = self._make_batch_buffers(stacked_in, host_out.nbytes)
-        stride = h * w * c
-        for i in range(n):
-            sub_in = buf_in.get_sub_region(i * stride, stride)
-            sub_out = buf_out.get_sub_region(i * stride, stride)
-            self.program.blur(
-                self.queue, (h, w), None,
-                sub_in, sub_out, np.int32(h), np.int32(w))
+        self._kernels['blur_batch'](
+            self.queue, self._batch_global_size((h, w), n), None,
+            buf_in, buf_out, np.int32(h), np.int32(w))
         cl.enqueue_copy(self.queue, host_out, buf_out).wait()
         return [host_out[i] for i in range(n)]
+
+    def _compute_batch_histograms_cl(
+        self,
+        stacked_g: np.ndarray,
+        n: int,
+    ) -> np.ndarray:
+        """Calcula los N histogramas del lote con un solo kernel 3D."""
+        h, w = stacked_g.shape[1], stacked_g.shape[2]
+        histograms = np.zeros((n, HISTOGRAM_BINS), dtype=np.uint32)
+        buf_g = self._read_buffer(stacked_g)
+        buf_h = cl.Buffer(
+            self.ctx, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR,
+            hostbuf=histograms)
+        self._kernels['histogram_batch'](
+            self.queue, self._batch_global_size((h, w), n), None,
+            buf_g, buf_h, np.int32(h), np.int32(w))
+        cl.enqueue_copy(self.queue, histograms, buf_h).wait()
+        return histograms
 
     def _compute_batch_luts_cl(
         self,
@@ -384,35 +533,14 @@ class OpenCLBackend(GPUBackend):
         n: int,
     ) -> list[np.ndarray]:
         """Calcula la LUT de ecualización de cada imagen del lote."""
-        return [
-            compute_equalize_lut(self._compute_histogram(stacked_g[i]))
-            for i in range(n)
-        ]
-
-    def _enqueue_equalize_kernels(
-        self,
-        buf_g,
-        buf_l,
-        buf_o,
-        n: int,
-        h: int,
-        w: int,
-    ) -> None:
-        """Lanza map_lut sobre sub-buffers de grises, LUTs y salida."""
-        lut_stride = HISTOGRAM_BINS
-        for i in range(n):
-            sub_g = buf_g.get_sub_region(i * h * w, h * w)
-            sub_l = buf_l.get_sub_region(i * lut_stride, lut_stride)
-            sub_o = buf_o.get_sub_region(i * h * w, h * w)
-            self.program.map_lut(
-                self.queue, (h, w), None,
-                sub_g, sub_l, sub_o, np.int32(h), np.int32(w))
+        histograms = self._compute_batch_histograms_cl(stacked_g, n)
+        return [compute_equalize_lut(histograms[i]) for i in range(n)]
 
     def _batch_equalize_cl(
         self,
         images: list[np.ndarray],
     ) -> list[np.ndarray]:
-        """Ecualiza histograma en lote; D2H final agrupa toda la salida."""
+        """Ecualiza histograma en lote; un solo kernel 3D por etapa."""
         grays = [_to_grayscale(img) for img in images]
         stacked_g = np.ascontiguousarray(np.stack(grays))
         n, h, w = stacked_g.shape
@@ -421,7 +549,9 @@ class OpenCLBackend(GPUBackend):
         host_out = np.zeros((n, h, w), dtype=np.uint8)
         buf_g, buf_o = self._make_batch_buffers(stacked_g, host_out.nbytes)
         buf_l = self._read_buffer(stacked_l)
-        self._enqueue_equalize_kernels(buf_g, buf_l, buf_o, n, h, w)
+        self._kernels['map_lut_batch'](
+            self.queue, self._batch_global_size((h, w), n), None,
+            buf_g, buf_l, buf_o, np.int32(h), np.int32(w))
         cl.enqueue_copy(self.queue, host_out, buf_o).wait()
         return [host_out[i] for i in range(n)]
 
@@ -440,7 +570,7 @@ class OpenCLBackend(GPUBackend):
         hist_buf = cl.Buffer(
             self.ctx, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR,
             hostbuf=histogram)
-        self.program.histogram(
+        self._kernels['histogram'](
             self.queue, (rows, cols), None,
             gray_buf, hist_buf, np.int32(rows), np.int32(cols))
         cl.enqueue_copy(self.queue, histogram, hist_buf).wait()
@@ -453,7 +583,7 @@ class OpenCLBackend(GPUBackend):
         gray_buf = self._read_buffer(gray)
         lut_buf = self._read_buffer(lut)
         out_buf = cl.Buffer(self.ctx, cl.mem_flags.WRITE_ONLY, output.nbytes)
-        self.program.map_lut(
+        self._kernels['map_lut'](
             self.queue, (rows, cols), None,
             gray_buf, lut_buf, out_buf, np.int32(rows), np.int32(cols))
         cl.enqueue_copy(self.queue, output, out_buf).wait()

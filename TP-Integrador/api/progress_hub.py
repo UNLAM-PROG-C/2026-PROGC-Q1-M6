@@ -56,6 +56,13 @@ class ProgressHub:
     def update_progress(self, current: int, total: int) -> None:
         """Actualiza el progreso desde un hilo worker (API de #21).
 
+        No toca running: ese flag lo controla exclusivamente
+        set_running(), que se llama recién cuando el pipeline (incluido
+        el guardado de imágenes a disco) terminó de verdad. Si no,
+        current == total dispara running=False mientras el ImageSaver
+        todavía está escribiendo, y el front refresca la galería antes
+        de que el manifest.json nuevo esté listo.
+
         Args:
             current: Imágenes procesadas hasta el momento.
             total: Total de imágenes a procesar.
@@ -63,10 +70,11 @@ class ProgressHub:
         with self._lock:
             self._current = current
             self._total = total
-            self._running = current < total
-            if not self._running and self._start_time > 0:
+            if current >= total > 0 and self._start_time > 0:
                 self._final_elapsed = time.perf_counter() - self._start_time
-                self._final_speed = self._current / self._final_elapsed if self._final_elapsed > 0 else 0.0
+                self._final_speed = (
+                    self._current / self._final_elapsed
+                    if self._final_elapsed > 0 else 0.0)
         self._notify()
 
     def set_running(self, running: bool) -> None:

@@ -61,9 +61,11 @@ class ProcessingWorker:
             operation: Operación a aplicar a cada imagen.
             backend_label: Etiqueta del backend para las métricas.
             io_queue: Cola de guardado de imágenes (opcional).
-            bench_backend: Backend secundario para benchmark (opcional).
+            bench_backend: Backend CPU de benchmark; su salida se
+                descarta, solo se registra el tiempo (opcional).
             bench_label: Etiqueta del backend de benchmark (opcional).
-            batcher: Acumulador GPU para batching (reemplaza bench_backend).
+            batcher: Acumulador GPU primario: procesa, guarda y
+                registra en lote (opcional).
         """
         self._input_queue = input_queue
         self._result_queue = result_queue
@@ -129,28 +131,32 @@ class ProcessingWorker:
         self._result_queue.put(
             (name, self._bench_label, self._operation, bench_ms))
 
-    def _process_one(self, path: str) -> None:
-        """Procesa una imagen y encola su métrica de tiempo."""
+    def _decode(self, path: str) -> object:
+        """Decodifica una imagen desde disco; None si falla o es ilegible."""
         import numpy as np
         try:
-            image = cv2.imdecode(
+            return cv2.imdecode(
                 np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
         except Exception:
-            image = None
+            return None
+
+    def _process_one(self, path: str) -> None:
+        """Procesa una imagen y encola su métrica de tiempo."""
+        image = self._decode(path)
         if image is None:
             _LOGGER.warning('Imagen ilegible: %s', path)
             return
         name = os.path.basename(path)
+        self._process_primary(name, image)
+        self._enqueue_bench(image, name)
+
+    def _process_primary(self, name: str, image: object) -> None:
+        """Procesa la imagen por el camino primario: batch o per-imagen."""
+        if self._batcher is not None:
+            self._batcher.add(name, image)
+            return
         label, elapsed_ms, processed = self._time_backend(
             image, self._backend, self._backend_label)
         if self._io_queue is not None:
             self._io_queue.put((name, self._operation, processed))
         self._result_queue.put((name, label, self._operation, elapsed_ms))
-        self._dispatch_bench(image, name)
-
-    def _dispatch_bench(self, image: object, name: str) -> None:
-        """Enruta el benchmark al batcher (lote) o al path per-imagen."""
-        if self._batcher is not None:
-            self._batcher.add(name, image)
-        else:
-            self._enqueue_bench(image, name)
