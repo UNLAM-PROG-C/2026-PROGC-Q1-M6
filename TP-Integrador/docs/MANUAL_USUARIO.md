@@ -303,6 +303,24 @@ archivo `manifest.json` que el dashboard usa para armar la galería.
 El sistema no detectó una placa compatible o faltan drivers. Con NVIDIA se necesitan los
 drivers + CUDA Toolkit; con AMD/Intel, drivers OpenCL. Igual funciona todo en CPU.
 
+**El procesamiento con GPU integrada (ej. Ryzen) se satura o va lento.**
+Las GPU integradas exponen OpenCL pero no rinden como una placa dedicada y pueden saturar el
+pipeline. Para forzar el uso de CPU y saltear OpenCL, definí la variable de entorno
+`PARALLELVISION_DISABLE_OPENCL=1` antes de iniciar el backend o la CLI:
+
+```powershell
+# Windows (PowerShell)
+$env:PARALLELVISION_DISABLE_OPENCL = "1"; python main.py --input-dir ruta/a/imagenes
+```
+
+```bash
+# Linux / macOS
+PARALLELVISION_DISABLE_OPENCL=1 python main.py --input-dir ruta/a/imagenes
+```
+
+Solo afecta a OpenCL (la ruta CUDA de NVIDIA se mantiene). Para volver al comportamiento
+normal, no definas la variable (o poné `=0`).
+
 **El botón "Iniciar procesamiento" está deshabilitado.**
 Faltó seleccionar la carpeta de entrada, la de salida o la operación. Completá los tres.
 
