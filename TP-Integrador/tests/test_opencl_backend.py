@@ -21,6 +21,7 @@ def _mocked_opencl_process(operation, mock_output):
          patch('core.backend.opencl.cl.Context'), \
          patch('core.backend.opencl.cl.CommandQueue'), \
          patch('core.backend.opencl.cl.Program'), \
+         patch('core.backend.opencl.cl.Kernel'), \
          patch('core.backend.opencl.cl.Buffer'), \
          patch('core.backend.opencl.cl.enqueue_copy') as mock_copy:
          
@@ -79,7 +80,8 @@ def test_opencl_process_invalid_operation():
         with patch('core.backend.opencl.cl.get_platforms') as mock_platforms, \
              patch('core.backend.opencl.cl.Context'), \
              patch('core.backend.opencl.cl.CommandQueue'), \
-             patch('core.backend.opencl.cl.Program'):
+             patch('core.backend.opencl.cl.Program'), \
+             patch('core.backend.opencl.cl.Kernel'):
             mock_device = MagicMock()
             mock_platform = MagicMock()
             mock_platform.get_devices.return_value = [mock_device]
@@ -96,6 +98,7 @@ def test_opencl_context_initialized_once():
          patch('core.backend.opencl.cl.Context') as mock_context, \
          patch('core.backend.opencl.cl.CommandQueue'), \
          patch('core.backend.opencl.cl.Program'), \
+         patch('core.backend.opencl.cl.Kernel'), \
          patch('core.backend.opencl.cl.Buffer'), \
          patch('core.backend.opencl.cl.enqueue_copy'):
          
@@ -113,6 +116,38 @@ def test_opencl_context_initialized_once():
         # Call process
         backend.program = MagicMock() # mock the kernel
         backend.process(np.zeros((10, 10, 3), dtype=np.uint8), "grayscale")
-        
+
         # Verify Context is STILL 1 (not created again during process)
         assert mock_context.call_count == 1
+
+
+def test_opencl_process_batch_signature():
+    """OpenCLBackend.process_batch tiene la firma correcta."""
+    import inspect
+    sig = inspect.signature(OpenCLBackend.process_batch)
+    assert 'images' in sig.parameters
+    assert 'operation' in sig.parameters
+
+
+@pytest.mark.parametrize(
+    'operation', ['grayscale', 'edges', 'blur', 'equalize'])
+def test_opencl_process_batch_on_hardware(test_image, operation):
+    """En hardware real, process_batch iguala al resultado de process."""
+    if not HAS_OPENCL_HARDWARE:
+        pytest.skip('No OpenCL hardware disponible')
+    backend = OpenCLBackend()
+    expected = backend.process(test_image, operation)
+    results, per_ms = backend.process_batch(
+        [test_image, test_image], operation)
+    np.testing.assert_array_equal(expected, results[0])
+    np.testing.assert_array_equal(expected, results[1])
+    assert per_ms is not None and per_ms >= 0
+
+
+def test_opencl_warmup_smoke():
+    """warmup(op) no lanza excepciones en hardware real."""
+    if not HAS_OPENCL_HARDWARE:
+        pytest.skip('No OpenCL hardware disponible')
+    backend = OpenCLBackend()
+    for operation in ('grayscale', 'edges', 'blur', 'equalize'):
+        backend.warmup(operation)

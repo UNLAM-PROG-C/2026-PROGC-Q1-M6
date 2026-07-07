@@ -12,6 +12,7 @@ import os
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from typing import NamedTuple
 
 from core.backend import VALID_OPERATIONS, CPUBackend, get_backend
 from core.backend.base import CPU_BACKEND_NAME, GPUBackend
@@ -28,6 +29,15 @@ _LOG_FORMAT: str = '[%(levelname)s] %(message)s'
 _SUMMARY_HEADER: str = '\nResumen por operación:'
 IO_QUEUE_SIZE: int = 10
 BENCHMARK_RECORDS_PER_IMAGE: int = 2
+
+
+class WorkerConfig(NamedTuple):
+    """Dependencias opcionales inyectadas a cada ProcessingWorker del pool."""
+
+    io_queue: ImageQueue | None
+    batcher: GpuBatcher | None
+    bench_backend: GPUBackend | None
+    bench_label: str | None
 
 
 def _parse_args() -> argparse.Namespace:
@@ -91,21 +101,22 @@ def _make_benchmark_backends(
 ) -> tuple[GPUBackend, GPUBackend | None, str | None]:
     """Devuelve (backend_primario, bench_backend, bench_label).
 
-    En modo benchmark, el primario es CPUBackend y el bench es el
-    backend GPU detectado. Si no hay GPU real, cae a modo simple.
+    El primario es siempre el mejor hardware disponible: guarda y
+    muestra su resultado. En modo benchmark con GPU se agrega un bench
+    CPU per-imagen que solo mide tiempo (su salida se descarta) para
+    calcular el speedup. Sin GPU real no hay bench posible.
 
     Args:
-        benchmark: True para activar el modo benchmark CPU+GPU.
+        benchmark: True para agregar el bench CPU cuando hay GPU.
 
     Returns:
-        Tupla (primario, bench, bench_label); bench es None sin GPU.
+        Tupla (primario, bench, bench_label); bench es None sin GPU o
+        fuera de modo benchmark.
     """
-    if not benchmark:
-        return get_backend(), None, None
-    gpu = get_backend()
-    if gpu.backend_name == CPU_BACKEND_NAME:
-        return gpu, None, None
-    return CPUBackend(), gpu, GPU_BACKEND
+    primary = get_backend()
+    if not benchmark or primary.backend_name == CPU_BACKEND_NAME:
+        return primary, None, None
+    return primary, CPUBackend(), CPU_BACKEND
 
 
 def _warmup_backend(backend: GPUBackend | None, operation: str) -> None:
@@ -123,15 +134,15 @@ def _submit_workers(
     result_queue: ImageQueue,
     backend: GPUBackend,
     args: argparse.Namespace,
-    io_queue: ImageQueue | None,
-    batcher: GpuBatcher | None,
+    config: WorkerConfig,
 ) -> None:
     """Crea y registra los workers en el executor."""
     for _ in range(args.workers):
         worker = ProcessingWorker(
             input_queue, result_queue, backend, args.operation,
-            backend_label=CPU_BACKEND, io_queue=io_queue,
-            batcher=batcher)
+            backend_label=CPU_BACKEND, io_queue=config.io_queue,
+            bench_backend=config.bench_backend,
+            bench_label=config.bench_label, batcher=config.batcher)
         executor.submit(worker.run)
 
 
@@ -147,9 +158,13 @@ def _process_images(
 ) -> None:
     """Lanza los workers en un pool y encola las rutas a procesar.
 
-    Crea un GpuBatcher compartido cuando hay bench_backend GPU; los workers
-    alimentan el batcher en vez de cronometrar GPU por imagen. flush_all()
-    se llama tras el shutdown para procesar los lotes parciales finales.
+    Cuando backend es GPU, arma un GpuBatcher primario: procesa, guarda
+    (si io_queue no es None) y registra en lote con label GPU_BACKEND; los
+    workers lo alimentan en vez de invocar backend.process() por imagen.
+    flush_all() se llama tras el shutdown para procesar los lotes
+    parciales finales. bench_backend (CPU en modo benchmark) agrega un
+    record per-imagen adicional cuya salida se descarta, usado solo para
+    calcular el speedup.
 
     Args:
         args: Argumentos de configuración del pipeline.
@@ -161,16 +176,15 @@ def _process_images(
         bench_backend: Backend secundario para benchmark (opcional).
         bench_label: Etiqueta del bench_backend (opcional).
     """
-    batcher = (
-        GpuBatcher(result_queue, bench_backend, bench_label or '', args.operation)
-        if bench_backend else None
-    )
+    batcher = None
+    if backend.backend_name != CPU_BACKEND_NAME:
+        batcher = GpuBatcher(
+            result_queue, backend, GPU_BACKEND, args.operation, io_queue)
     _warmup_backend(backend, args.operation)
-    if batcher is not None:
-        batcher.warmup(args.operation)
     executor = ThreadPoolExecutor(max_workers=args.workers)
+    config = WorkerConfig(io_queue, batcher, bench_backend, bench_label)
     _submit_workers(
-        executor, input_queue, result_queue, backend, args, io_queue, batcher)
+        executor, input_queue, result_queue, backend, args, config)
     enqueue_paths(paths, input_queue, args.workers)
     executor.shutdown(wait=True)
     if batcher is not None:
