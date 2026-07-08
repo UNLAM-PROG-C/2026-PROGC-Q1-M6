@@ -175,7 +175,7 @@ Closes #N
 | Lenguaje backend | Python 3.11+ |
 | Lenguaje frontend | TypeScript (~5.7) |
 | Concurrencia CPU | `concurrent.futures.ThreadPoolExecutor` |
-| Procesamiento imagen | Pillow, OpenCV, NumPy |
+| Procesamiento imagen | NumPy, Pillow |
 | GPU NVIDIA | Numba (CUDA kernels) |
 | GPU AMD/Intel | PyOpenCL |
 | Cola | `queue.Queue` |

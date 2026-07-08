@@ -172,7 +172,7 @@ Una vez seleccionado el backend, el flujo de datos es el mismo en todos los caso
 | Lenguaje principal (backend) | Python 3.11+ | Pipeline, backends y API |
 | Lenguaje frontend | TypeScript ~5.7 | Dashboard web (SPA) |
 | Concurrencia CPU | `concurrent.futures` – `ThreadPoolExecutor` | Pool de hilos para procesamiento paralelo en CPU |
-| Procesamiento imagen CPU | Pillow, OpenCV, NumPy | Transformaciones: blur, bordes, escala de grises, ecualización |
+| Procesamiento imagen CPU | Pillow, NumPy | Transformaciones: blur, bordes, escala de grises, ecualización |
 | Backend GPU NVIDIA | Numba (CUDA) | Kernels paralelos en GPU NVIDIA; compatible con Google Colab |
 | Backend GPU AMD / Intel | PyOpenCL | Kernels paralelos en GPUs con soporte OpenCL (incluye integradas) |
 | Detección de backend | Lógica de runtime propia (`core/backend/factory.py`) | Strategy Pattern — selección automática sin intervención del usuario |

@@ -14,6 +14,16 @@ Fecha de entrega: **08/07/2026**
 | De La Cruz Zamudio, Axel Nahuel | 41.063.583 |
 | Graneros, Brian Ariel | 41.130.084 |
 
+### Tabla de compatibilidad de Hardware
+
+El sistema tiene detección automática de hardware, utilizando el mejor disponible según la siguiente prioridad:
+
+| Hardware | Backend | Librería | Prioridad |
+|---|---|---|---|
+| NVIDIA GPU | CUDA | Numba | 1 (Más Alta) |
+| AMD / Intel GPU | OpenCL | PyOpenCL | 2 |
+| Cualquier CPU | Multithreading | NumPy / concurrent.futures | 3 (Más Baja) |
+
 ---
 
 ## 1. Descripción y finalidad

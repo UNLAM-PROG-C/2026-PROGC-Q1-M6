@@ -96,7 +96,7 @@ def test_gpu_fallback_on_oom(tmp_path):
     """Ante un OOM mockeado, el pipeline cae a CPU y lo registra."""
     backend = _build_sim_cuda_backend()
     _write_images(tmp_path, FALLBACK_IMAGE_COUNT, IMAGE_SIZE)
-    with patch.object(backend, '_process_on_gpu', side_effect=MemoryError):
+    with patch.object(backend, '_run_grayscale', side_effect=MemoryError):
         metrics = _run_pipeline(tmp_path, backend, 'grayscale', SINGLE_WORKER)
     records = metrics.get_records()
     assert len(records) == FALLBACK_IMAGE_COUNT
@@ -109,6 +109,6 @@ def test_gpu_fallback_matches_cpu_result():
     image = np.random.randint(
         0, 256, (IMAGE_SIZE, IMAGE_SIZE, 3), dtype=np.uint8)
     expected = CPUBackend().process(image, 'grayscale')
-    with patch.object(backend, '_process_on_gpu', side_effect=MemoryError):
+    with patch.object(backend, '_run_grayscale', side_effect=MemoryError):
         result = backend.process(image, 'grayscale')
     assert np.array_equal(result, expected)

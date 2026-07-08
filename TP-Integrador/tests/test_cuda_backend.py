@@ -23,20 +23,11 @@ def test_image():
 
 def _mocked_cuda_process(operation, mock_output):
     """Configura los mocks para simular la inicialización y proceso en CUDA."""
-    with patch('core.backend.cuda.cuda.get_current_device'), \
-         patch('core.backend.cuda.cuda.to_device') as mock_to_device, \
-         patch('core.backend.cuda._OPERATIONS_CUDA', new_callable=dict) as mock_ops, \
-         patch('core.backend.cuda.cuda.synchronize'):
-         
-        mock_d_array = MagicMock()
-        mock_d_array.copy_to_host.return_value = mock_output
-        mock_to_device.return_value = mock_d_array
-        
-        mock_kernel = MagicMock()
-        mock_ops[operation] = mock_kernel
-        
+    with patch('core.backend.cuda.cuda.get_current_device'):
         backend = CUDABackend()
-        return backend.process(np.zeros((10, 10, 3), dtype=np.uint8), operation)
+        method_name = f'_run_{operation}'
+        with patch.object(backend, method_name, return_value=mock_output):
+            return backend.process(np.zeros((10, 10, 3), dtype=np.uint8), operation)
 
 def test_cuda_grayscale_output_shape(test_image):
     if HAS_CUDA_HARDWARE:
@@ -123,15 +114,13 @@ def test_cuda_process_batch_on_hardware(test_image):
 def test_cuda_memory_not_leaked(test_image):
     # This test is always mocked to specifically check if copy_to_host was called
     with patch('core.backend.cuda.cuda.get_current_device'), \
-         patch('core.backend.cuda.cuda.to_device') as mock_to_device, \
-         patch('core.backend.cuda._OPERATIONS_CUDA', new_callable=dict) as mock_ops, \
+         patch('core.backend.cuda.cuda.to_device'), \
+         patch('core.backend.cuda.cuda.device_array') as mock_device_array, \
+         patch('core.backend.cuda.grayscale_kernel'), \
          patch('core.backend.cuda.cuda.synchronize'):
          
         mock_d_array = MagicMock()
-        mock_to_device.return_value = mock_d_array
-        
-        mock_kernel = MagicMock()
-        mock_ops['grayscale'] = mock_kernel
+        mock_device_array.return_value = mock_d_array
         
         backend = CUDABackend()
         backend.process(test_image, "grayscale")

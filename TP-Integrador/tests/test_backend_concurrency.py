@@ -34,7 +34,7 @@ def test_semaphore_limits_concurrent_access():
     # Mockeamos toda la inicialización de hardware para que pueda correr sin GPU
     with patch('core.backend.cuda.cuda.get_current_device'), \
          patch.object(
-             CUDABackend, '_process_on_gpu',
+             CUDABackend, '_run_grayscale',
              side_effect=mock_process_on_gpu):
          
         backend = CUDABackend()
