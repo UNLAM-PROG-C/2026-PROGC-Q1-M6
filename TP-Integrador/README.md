@@ -150,6 +150,10 @@ siguiente prioridad:
   backend **CPU** (ThreadPoolExecutor), que funciona en cualquier máquina.
 - **NVIDIA (CUDA):** requiere drivers NVIDIA actualizados y el **CUDA Toolkit** instalado.
 - **AMD / Intel (OpenCL):** requiere drivers OpenCL compatibles (incluye GPUs integradas).
+- **Forzar CPU (saltear OpenCL):** en GPUs integradas (p. ej. Ryzen) OpenCL puede saturar el
+  procesamiento. Para evitar OpenCL y usar CPU, definir la variable de entorno
+  `PARALLELVISION_DISABLE_OPENCL=1` antes de correr `python main.py` o la API. Solo afecta a
+  OpenCL; la ruta CUDA se mantiene. Para volver al comportamiento normal, no definir la variable.
 - **Control de saturación de GPU:** el envío a GPU está limitado por semáforo
   (`MAX_GPU_CONCURRENT_BATCHES = 2`) y trabaja por lotes (`MAX_GPU_BATCH_SIZE = 32`). Ante un
   error de memoria de video (OOM) el sistema hace **fallback automático a CPU** por imagen.
