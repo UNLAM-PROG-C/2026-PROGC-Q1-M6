@@ -64,9 +64,9 @@ def get_backend(
     Returns:
         El primer backend disponible en orden CUDA → OpenCL → CPU.
     """
-    backend = _get_cuda_backend(on_fallback)
-    if backend:
-        return backend
+    # backend = _get_cuda_backend(on_fallback)
+    # if backend:
+    #     return backend
 
     backend = _get_opencl_backend(on_fallback)
     if backend:

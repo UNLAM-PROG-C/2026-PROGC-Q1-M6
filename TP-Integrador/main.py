@@ -181,6 +181,8 @@ def _process_images(
         batcher = GpuBatcher(
             result_queue, backend, GPU_BACKEND, args.operation, io_queue)
     _warmup_backend(backend, args.operation)
+    if bench_backend is not None:
+        _warmup_backend(bench_backend, args.operation)
     executor = ThreadPoolExecutor(max_workers=args.workers)
     config = WorkerConfig(io_queue, batcher, bench_backend, bench_label)
     _submit_workers(

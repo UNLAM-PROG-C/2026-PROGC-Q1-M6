@@ -317,7 +317,19 @@ class OpenCLBackend(GPUBackend):
         if not platforms:
             raise RuntimeError("No se encontraron plataformas OpenCL")
 
-        device = platforms[0].get_devices()[0]
+        device = None
+        # Buscar la GPU integrada (ignorar NVIDIA)
+        for p in platforms:
+            for d in p.get_devices():
+                if "NVIDIA" not in d.name:
+                    device = d
+                    break
+            if device:
+                break
+                
+        if not device:
+            device = platforms[0].get_devices()[0]
+
         self.backend_name = OPENCL_BACKEND_NAME
         self.device_info = device.name
         self._on_fallback = on_fallback
@@ -328,6 +340,23 @@ class OpenCLBackend(GPUBackend):
         self._kernels = {
             name: cl.Kernel(self.program, name) for name in _KERNEL_NAMES
         }
+
+    def _get_work_sizes(self, shape: tuple) -> tuple:
+        local_size = (16, 16)
+        global_size = (
+            ((shape[0] + 15) // 16) * 16,
+            ((shape[1] + 15) // 16) * 16
+        )
+        return global_size, local_size
+
+    def _get_batch_work_sizes(self, shape: tuple, n: int) -> tuple:
+        local_size = (1, 16, 16)
+        global_size = (
+            n,
+            ((shape[0] + 15) // 16) * 16,
+            ((shape[1] + 15) // 16) * 16
+        )
+        return global_size, local_size
 
     def process(self, image: np.ndarray, operation: str) -> np.ndarray:
         """Aplica la operación a la imagen usando un kernel OpenCL.
@@ -396,8 +425,9 @@ class OpenCLBackend(GPUBackend):
         output = np.zeros((rows, cols), dtype=np.uint8)
         img_buf, out_buf = self._create_buffers(image, output)
         kernel_func = self._kernels[_OPERATIONS_OPENCL[operation]]
+        g_size, l_size = self._get_work_sizes((rows, cols))
         kernel_func(
-            self.queue, (rows, cols), None,
+            self.queue, g_size, l_size,
             img_buf, out_buf, np.int32(rows), np.int32(cols))
         cl.enqueue_copy(self.queue, output, out_buf).wait()
         return output
@@ -408,8 +438,9 @@ class OpenCLBackend(GPUBackend):
         output = np.zeros(
             (rows, cols, OPENCL_IMAGE_CHANNELS), dtype=np.uint8)
         img_buf, out_buf = self._create_buffers(image, output)
+        g_size, l_size = self._get_work_sizes((rows, cols))
         self._kernels['blur'](
-            self.queue, (rows, cols), None,
+            self.queue, g_size, l_size,
             img_buf, out_buf, np.int32(rows), np.int32(cols))
         cl.enqueue_copy(self.queue, output, out_buf).wait()
         return output
@@ -491,8 +522,9 @@ class OpenCLBackend(GPUBackend):
         host_out = np.zeros((n, h, w), dtype=np.uint8)
         buf_in, buf_out = self._make_batch_buffers(stacked_in, host_out.nbytes)
         kernel_fn = self._kernels[_OPERATIONS_OPENCL_BATCH[operation]]
+        g_size, l_size = self._get_batch_work_sizes((h, w), n)
         kernel_fn(
-            self.queue, self._batch_global_size((h, w), n), None,
+            self.queue, g_size, l_size,
             buf_in, buf_out, np.int32(h), np.int32(w))
         cl.enqueue_copy(self.queue, host_out, buf_out).wait()
         return [host_out[i] for i in range(n)]
@@ -503,8 +535,9 @@ class OpenCLBackend(GPUBackend):
         n, h, w, _ = stacked_in.shape
         host_out = np.zeros_like(stacked_in)
         buf_in, buf_out = self._make_batch_buffers(stacked_in, host_out.nbytes)
+        g_size, l_size = self._get_batch_work_sizes((h, w), n)
         self._kernels['blur_batch'](
-            self.queue, self._batch_global_size((h, w), n), None,
+            self.queue, g_size, l_size,
             buf_in, buf_out, np.int32(h), np.int32(w))
         cl.enqueue_copy(self.queue, host_out, buf_out).wait()
         return [host_out[i] for i in range(n)]
@@ -521,8 +554,9 @@ class OpenCLBackend(GPUBackend):
         buf_h = cl.Buffer(
             self.ctx, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR,
             hostbuf=histograms)
+        g_size, l_size = self._get_batch_work_sizes((h, w), n)
         self._kernels['histogram_batch'](
-            self.queue, self._batch_global_size((h, w), n), None,
+            self.queue, g_size, l_size,
             buf_g, buf_h, np.int32(h), np.int32(w))
         cl.enqueue_copy(self.queue, histograms, buf_h).wait()
         return histograms
@@ -549,8 +583,9 @@ class OpenCLBackend(GPUBackend):
         host_out = np.zeros((n, h, w), dtype=np.uint8)
         buf_g, buf_o = self._make_batch_buffers(stacked_g, host_out.nbytes)
         buf_l = self._read_buffer(stacked_l)
+        g_size, l_size = self._get_batch_work_sizes((h, w), n)
         self._kernels['map_lut_batch'](
-            self.queue, self._batch_global_size((h, w), n), None,
+            self.queue, g_size, l_size,
             buf_g, buf_l, buf_o, np.int32(h), np.int32(w))
         cl.enqueue_copy(self.queue, host_out, buf_o).wait()
         return [host_out[i] for i in range(n)]
@@ -570,8 +605,9 @@ class OpenCLBackend(GPUBackend):
         hist_buf = cl.Buffer(
             self.ctx, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR,
             hostbuf=histogram)
+        g_size, l_size = self._get_work_sizes((rows, cols))
         self._kernels['histogram'](
-            self.queue, (rows, cols), None,
+            self.queue, g_size, l_size,
             gray_buf, hist_buf, np.int32(rows), np.int32(cols))
         cl.enqueue_copy(self.queue, histogram, hist_buf).wait()
         return histogram
@@ -583,8 +619,9 @@ class OpenCLBackend(GPUBackend):
         gray_buf = self._read_buffer(gray)
         lut_buf = self._read_buffer(lut)
         out_buf = cl.Buffer(self.ctx, cl.mem_flags.WRITE_ONLY, output.nbytes)
+        g_size, l_size = self._get_work_sizes((rows, cols))
         self._kernels['map_lut'](
-            self.queue, (rows, cols), None,
+            self.queue, g_size, l_size,
             gray_buf, lut_buf, out_buf, np.int32(rows), np.int32(cols))
         cl.enqueue_copy(self.queue, output, out_buf).wait()
         return output
