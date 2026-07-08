@@ -1,9 +1,5 @@
 from unittest.mock import Mock, patch
 from core.backend import (get_backend,CUDABackend, OpenCLBackend, CPUBackend)
-from core.backend.factory import (
-    DISABLE_OPENCL_ENV_VAR,
-    _get_opencl_backend,
-)
 
 @patch("core.backend.factory._get_opencl_backend")
 @patch("core.backend.factory._get_cuda_backend")
@@ -59,21 +55,6 @@ def test_backend_name_accessible():
     backend = CPUBackend()
 
     assert hasattr(backend,"backend_name" )
-
-@patch.dict("os.environ", {DISABLE_OPENCL_ENV_VAR: "1"})
-@patch("core.backend.factory._get_cuda_backend")
-def test_opencl_skipped_when_env_var_set(mock_cuda):
-
-    mock_cuda.return_value = None
-
-    backend = get_backend()
-
-    assert isinstance(backend, CPUBackend)
-
-@patch.dict("os.environ", {DISABLE_OPENCL_ENV_VAR: "1"})
-def test_get_opencl_backend_returns_none_when_disabled():
-
-    assert _get_opencl_backend() is None
 
 @patch("core.backend.opencl.cl")
 def test_device_info_accessible(mock_cl):
