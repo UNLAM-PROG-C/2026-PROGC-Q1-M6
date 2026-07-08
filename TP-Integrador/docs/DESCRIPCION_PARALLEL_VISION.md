@@ -17,17 +17,16 @@ Trabajo Práctico Integrador – Propuesta
 | Felice, Tomás Agustín | 44.789.809 |
 | De La Cruz Zamudio, Axel Nahuel | 41.063.583 |
 | Graneros, Brian Ariel | 41.130.084 |
-| Sanchez, Kevin Erik | 41.173.649 |
 
 ---
 
 ## 1. Descripción general
 
-**ParallelVision** es una herramienta de escritorio para el procesamiento masivo y paralelo de imágenes. El usuario selecciona una carpeta con decenas o cientos de archivos, elige las transformaciones a aplicar (escala de grises, detección de bordes, blur gaussiano, ecualización de histograma, entre otras) y el sistema las ejecuta en paralelo, aprovechando simultáneamente los núcleos de la CPU mediante un pool de hilos y los núcleos de la GPU a través de kernels de cómputo paralelo.
+**ParallelVision** es una herramienta para el procesamiento masivo y paralelo de imágenes. El usuario apunta el sistema a una carpeta con decenas o cientos de archivos, elige la transformación a aplicar (escala de grises, detección de bordes, blur gaussiano, ecualización de histograma) y el sistema la ejecuta en paralelo, aprovechando simultáneamente los núcleos de la CPU mediante un pool de hilos y los núcleos de la GPU a través de kernels de cómputo paralelo. Se puede usar de dos formas: en **modo CLI** (headless, desde la línea de comandos) o a través de un **dashboard web** cliente-servidor.
 
 Una característica central del diseño es la **detección automática de backend en runtime**: al iniciar, la aplicación detecta qué hardware GPU está disponible en la máquina y selecciona automáticamente el mejor motor de procesamiento sin que el usuario tenga que configurar nada. Esto hace que el aplicativo sea compatible con cualquier GPU del mercado — NVIDIA, AMD e Intel — y funcione en todas las máquinas del equipo sin cambiar una línea de código.
 
-El resultado es un dashboard en tiempo real que muestra el progreso imagen por imagen, el tiempo acumulado y una comparativa cuantitativa de rendimiento CPU vs GPU, ilustrando de forma tangible el beneficio del paralelismo masivo.
+El resultado es un dashboard web en tiempo real (React + FastAPI, comunicado por WebSocket) que muestra el progreso imagen por imagen, el tiempo acumulado y una comparativa cuantitativa de rendimiento CPU vs GPU, ilustrando de forma tangible el beneficio del paralelismo masivo.
 
 El proyecto tiene valor de mercado real: estudios fotográficos, equipos de machine learning y creadores de contenido necesitan procesar grandes volúmenes de imágenes de forma eficiente. Herramientas similares como Adobe Lightroom o Topaz Photo AI cuestan cientos de dólares por año; ParallelVision apunta a ser una alternativa liviana, open-source y compatible con cualquier hardware.
 
@@ -56,10 +55,10 @@ Desarrollar una aplicación funcional que demuestre de forma práctica y medible
 | Concepto | Aplicación en ParallelVision |
 | --- | --- |
 | **Hilos (Threads)** | Pool de hilos para procesar imágenes en paralelo en la CPU. Cada hilo toma un trabajo de la cola y aplica las transformaciones de forma independiente. |
-| **Productor-Consumidor** | El módulo de carga actúa como productor (agrega imágenes a la queue); los workers CPU/GPU actúan como consumidores. |
-| **Mutex / Lock** | El agregador de resultados usa un lock para escritura segura en la estructura compartida de métricas, evitando data races. |
-| **Semáforos** | Limitan la cantidad de imágenes enviadas a la GPU simultáneamente, evitando saturación de memoria de video. |
-| **Cola sincronizada (Queue)** | Estructura thread-safe que desacopla la carga del procesamiento, permitiendo que ambas etapas corran en paralelo. |
+| **Productor-Consumidor** | El módulo de carga actúa como productor (agrega paths a la cola de entrada); los workers CPU/GPU actúan como consumidores. A su vez, los workers producen imágenes procesadas hacia una **cola de E/S** que un hilo de guardado consume para escribir en disco. |
+| **Mutex / Lock** | El agregador de resultados usa un `threading.Lock` para escritura segura en la estructura compartida de métricas, evitando data races. |
+| **Semáforos** | Un semáforo (`MAX_GPU_CONCURRENT_BATCHES = 2`) limita la cantidad de **lotes** enviados a la GPU simultáneamente, evitando saturación de memoria de video (OOM). |
+| **Cola sincronizada (Queue)** | Colas `queue.Queue` thread-safe desacoplan carga, procesamiento y guardado, permitiendo que las etapas corran en paralelo. |
 | **Paralelismo masivo (GPU)** | Kernels CUDA u OpenCL que ejecutan la misma operación sobre miles de píxeles de forma verdaderamente simultánea. |
 | **Sincronización CPU-GPU** | Manejo explícito de transferencia de datos entre RAM y memoria de video (host-to-device / device-to-host) con sincronización de streams. |
 
@@ -91,35 +90,33 @@ Pipeline unificado — Queue + Lock + Dashboard
 (idéntico para todos los backends)
 ```
 
-La detección se implementa mediante el patrón **Strategy**: todos los backends exponen la misma interfaz (`process(image, operation)`), por lo que el resto de la aplicación nunca interactúa directamente con CUDA ni OpenCL. Esto desacopla completamente la lógica de negocio del hardware subyacente.
+La detección se implementa mediante el patrón **Strategy**: todos los backends exponen la misma interfaz (`process()` por imagen y `process_batch()` por lote), por lo que el resto de la aplicación nunca interactúa directamente con CUDA ni OpenCL. Esto desacopla completamente la lógica de negocio del hardware subyacente. La interfaz base y las constantes viven en `core/backend/base.py`, cada estrategia en su propio módulo (`cuda.py`, `opencl.py`, `cpu.py`) y la fábrica `get_backend()` en `core/backend/factory.py`.
 
 ```python
-class GPUBackend:
+# core/backend/base.py
+class GPUBackend(abc.ABC):
     """Interfaz común para todos los backends."""
-    def process(self, image: np.ndarray, operation: str) -> np.ndarray:
-        raise NotImplementedError
+    @abc.abstractmethod
+    def process(self, image: np.ndarray, operation: str) -> np.ndarray: ...
 
-class CUDABackend(GPUBackend):    # GPU NVIDIA
-    def process(self, image, operation): ...  # Numba CUDA
+    def process_batch(self, images, operation):
+        """Procesa un lote; devuelve (resultados, per_image_ms)."""
+        results = [self.process(img, operation) for img in images]
+        return results, NO_BATCH_TIME
 
-class OpenCLBackend(GPUBackend):  # GPU AMD / Intel integrada
-    def process(self, image, operation): ...  # PyOpenCL
+class CUDABackend(GPUBackend): ...    # GPU NVIDIA  (core/backend/cuda.py, Numba)
+class OpenCLBackend(GPUBackend): ...  # GPU AMD/Intel (core/backend/opencl.py, PyOpenCL)
+class CPUBackend(GPUBackend): ...     # Fallback     (core/backend/cpu.py, OpenCV/Pillow)
 
-class CPUBackend(GPUBackend):     # Fallback sin GPU
-    def process(self, image, operation): ...  # NumPy CPU
+# core/backend/factory.py
+def get_backend(on_fallback=None) -> GPUBackend:
+    """Primer backend disponible en orden CUDA → OpenCL → CPU.
 
-def get_backend() -> GPUBackend:
-    try:
-        import numba.cuda
-        if numba.cuda.is_available():
-            return CUDABackend()
-    except: pass
-    try:
-        import pyopencl as cl
-        if cl.get_platforms():
-            return OpenCLBackend()
-    except: pass
-    return CPUBackend()
+    on_fallback: callback que los backends GPU invocan al caer a CPU por OOM.
+    """
+    return (_get_cuda_backend(on_fallback)
+            or _get_opencl_backend(on_fallback)
+            or _get_cpu_backend())
 ```
 
 ### 4.2 Pipeline unificado
@@ -129,35 +126,42 @@ Una vez seleccionado el backend, el flujo de datos es el mismo en todos los caso
 ```
 ┌─────────────────────────────────────────┐
 │          Carga de imágenes              │  Capa 1
-│  Escanea carpeta → encola paths         │
+│  Escanea carpeta → encola paths         │  pipeline/image_loader.py
 └──────────────────┬──────────────────────┘
                    │
                    ▼
 ┌─────────────────────────────────────────┐
-│         Cola de trabajo (Queue)         │  Capa 2
-│     thread-safe · productor-consumidor  │
+│      Cola de entrada (ImageQueue)       │  Capa 2
+│     thread-safe · productor-consumidor  │  core/queue_manager.py
 └───────────┬─────────────────────┬───────┘
             │                     │
             ▼                     ▼
 ┌───────────────────┐   ┌──────────────────────┐
 │  Pool de hilos    │   │  Backend GPU activo   │  Capa 3
-│  CPU              │   │  CUDA / OpenCL        │
-│  ThreadPoolExec.  │   │  (según hardware)     │
-└───────────┬───────┘   └──────────┬───────────┘
-            │                      │
-            └──────────┬───────────┘
-                       ▼
-┌─────────────────────────────────────────┐
-│       Agregador de resultados           │  Capa 4
-│   threading.Lock · métricas · speedup   │
-└──────────────────┬──────────────────────┘
-                   │
-                   ▼
+│  CPU (workers)    │   │  CUDA / OpenCL        │  pipeline/worker.py
+│  ThreadPoolExec.  │   │  batching por lotes   │  pipeline/gpu_batcher.py
+└─────────┬─────────┘   └──────────┬───────────┘  core/backend/
+          │                        │
+          ├────────────────────────┤
+          │                        │
+          ▼                        ▼
+┌──────────────────────┐  ┌─────────────────────────┐
+│  Cola de E/S + hilo  │  │  Agregador de resultados │  Capa 4
+│  de guardado a disco │  │  Lock · métricas ·       │  pipeline/result_aggregator.py
+│  pipeline/image_saver│  │  speedup · reporte CSV   │  core/metrics.py
+└──────────────────────┘  └────────────┬────────────┘  pipeline/report_exporter.py
+                                       │
+                                       ▼
 ┌─────────────────────────────────────────┐
 │        Dashboard en tiempo real         │  Capa 5
-│    Tkinter / PyQt · matplotlib          │
+│  API FastAPI + WebSocket  ·  React/Vite │  api/ · frontend/
+│  gráfico de speedup (Recharts)          │
 └─────────────────────────────────────────┘
 ```
+
+> **Nota — dos frentes de salida de la Capa 3:** los workers producen (a) imágenes procesadas
+> hacia la **cola de E/S**, que un hilo dedicado (`ImageSaver`) escribe en disco, y (b) registros
+> de métricas hacia el **agregador**. Ambos caminos corren en paralelo con el procesamiento.
 
 ---
 
@@ -165,17 +169,20 @@ Una vez seleccionado el backend, el flujo de datos es el mismo en todos los caso
 
 | Área | Tecnología | Uso específico |
 | --- | --- | --- |
-| Lenguaje principal | Python 3.11+ | Toda la lógica de la aplicación |
+| Lenguaje principal (backend) | Python 3.11+ | Pipeline, backends y API |
+| Lenguaje frontend | TypeScript ~5.7 | Dashboard web (SPA) |
 | Concurrencia CPU | `concurrent.futures` – `ThreadPoolExecutor` | Pool de hilos para procesamiento paralelo en CPU |
-| Procesamiento imagen CPU | NumPy, Pure Python | Transformaciones: blur, bordes, escala de grises |
+| Procesamiento imagen CPU | Pillow, NumPy | Transformaciones: blur, bordes, escala de grises, ecualización |
 | Backend GPU NVIDIA | Numba (CUDA) | Kernels paralelos en GPU NVIDIA; compatible con Google Colab |
 | Backend GPU AMD / Intel | PyOpenCL | Kernels paralelos en GPUs con soporte OpenCL (incluye integradas) |
-| Detección de backend | Lógica de runtime propia | Strategy Pattern — selección automática sin intervención del usuario |
-| Cola sincronizada | `queue.Queue` | Buffer thread-safe entre productor y consumidores |
-| Sincronización | `threading.Lock` / `Semaphore` | Protección de recursos compartidos |
-| Interfaz gráfica | Tkinter o PyQt5 | Dashboard con progreso en tiempo real |
-| Métricas / gráficos | matplotlib | Gráfico de speedup CPU vs GPU en vivo |
-| Entorno alternativo | Google Colab (GPU T4/A100) | Demo del backend CUDA con hardware dedicado y speedups más altos |
+| Detección de backend | Lógica de runtime propia (`core/backend/factory.py`) | Strategy Pattern — selección automática sin intervención del usuario |
+| Cola sincronizada | `queue.Queue` | Buffer thread-safe entre productor y consumidores (entrada y E/S) |
+| Sincronización | `threading.Lock` / `Semaphore` | Protección de métricas y control de saturación de GPU |
+| API / servidor | FastAPI + Uvicorn + WebSockets | REST para configurar/lanzar y WebSocket para progreso en vivo |
+| Interfaz gráfica | React 18.3 + Vite 6 + TailwindCSS | Dashboard cliente-servidor con progreso en tiempo real |
+| Métricas / gráficos | Recharts | Gráfico de speedup CPU vs GPU en vivo |
+| Túnel para Colab | pyngrok | Expone el backend CUDA de Colab por túnel HTTP |
+| Entorno alternativo | Google Colab (GPU NVIDIA T4) | Demo del backend CUDA con hardware dedicado y speedups más altos |
 
 ### Compatibilidad de hardware por backend
 
@@ -185,7 +192,7 @@ Una vez seleccionado el backend, el flujo de datos es el mismo en todos los caso
 | GPU AMD dedicada o integrada | OpenCL | PyOpenCL |
 | GPU Intel integrada (Ryzen, Core) | OpenCL | PyOpenCL |
 | Sin GPU / CPU only | CPU fallback | ThreadPoolExecutor |
-| Google Colab | CUDA (T4 / A100) | Numba CUDA |
+| Google Colab | CUDA (NVIDIA T4) | Numba CUDA |
 
 ---
 
@@ -193,18 +200,20 @@ Una vez seleccionado el backend, el flujo de datos es el mismo en todos los caso
 
 ### Núcleo del procesamiento
 
-- Selección de carpeta de entrada y carpeta de salida desde la interfaz.
-- Elección de transformaciones: escala de grises, detección de bordes (Canny), blur gaussiano, ecualización de histograma.
-- Detección automática del backend óptimo al iniciar (CUDA → OpenCL → CPU).
+- Dos modos de uso: **CLI headless** (`python main.py --input-dir ... --operation ...`) y **dashboard web**.
+- Selección de carpeta de entrada y carpeta de salida (navegador de directorios en la interfaz).
+- Elección de la transformación: escala de grises, detección de bordes (Canny en CPU / Sobel en los kernels GPU), blur gaussiano, ecualización de histograma.
+- Detección automática del backend óptimo al iniciar (CUDA → OpenCL → CPU), con **fallback automático a CPU** por imagen ante un error de memoria de video (OOM).
 - Indicador visible en la interfaz del backend activo y el hardware detectado.
-- Cola de trabajo configurable: el usuario ajusta el tamaño del pool de hilos y la cantidad de lotes GPU.
+- Cola de trabajo configurable: el usuario ajusta el tamaño del pool de hilos (`--workers`) y de la cola (`--queue-size`); el batching GPU trabaja por lotes (`MAX_GPU_BATCH_SIZE = 32`).
 
 ### Dashboard en tiempo real
 
 - Barra de progreso global y por imagen actualmente en procesamiento.
 - Velocidad de procesamiento en imágenes/segundo y tiempo transcurrido.
 - Estimación de tiempo restante basada en el rendimiento actual.
-- Gráfico en vivo de speedup: tiempo CPU vs tiempo GPU por lote de imágenes.
+- Gráfico en vivo de speedup: tiempo CPU vs tiempo GPU por lote de imágenes (Recharts).
+- Galería de resultados e inspector con comparador *antes / después* de cada imagen procesada.
 
 ### Reporte final
 
@@ -242,4 +251,4 @@ Una vez seleccionado el backend, el flujo de datos es el mismo en todos los caso
 - [ ] `README.md` con descripción, instrucciones de instalación y manual de usuario.
 - [ ] Informe en formato PDF con carátula, descripción técnica, manual de usuario y conclusiones.
 - [ ] Video de demostración del aplicativo en funcionamiento (enlace incluido en el informe).
-- [ ] Cuaderno Google Colab demostrando el backend CUDA con GPU Tesla/A100 y métricas de speedup a mayor escala.
+- [ ] Cuaderno Google Colab demostrando el backend CUDA con GPU NVIDIA T4 y métricas de speedup a mayor escala (ver [docs/COLAB_GPU.md](COLAB_GPU.md)).

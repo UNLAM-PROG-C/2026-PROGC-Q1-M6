@@ -6,49 +6,54 @@ Guía de contexto para el asistente de IA trabajando en este proyecto.
 
 **ParallelVision** — pipeline de procesamiento masivo de imágenes con CPU y GPU.  
 Materia: Programación Concurrente, UNLAM, 1° Cuatrimestre 2026.  
-Entrega: 01/07–08/07/2026.
+Entrega: 08/07/2026.
+
+Se usa de dos formas: **CLI headless** (`python main.py`) y **dashboard web**
+cliente-servidor (backend FastAPI + frontend React/Vite, progreso por WebSocket).
 
 ## Arquitectura
 
 El sistema tiene 5 capas:
 
 ```
-Capa 1: Carga de imágenes      → escanea carpeta, encola paths
-Capa 2: Cola de trabajo (Queue) → thread-safe, productor-consumidor
-Capa 3: Workers CPU + GPU       → ThreadPoolExecutor | CUDA | OpenCL
-Capa 4: Agregador de resultados → threading.Lock, métricas, speedup
-Capa 5: Dashboard en tiempo real → Tkinter/PyQt + matplotlib
+Capa 1: Carga de imágenes       → escanea carpeta, encola paths (pipeline/image_loader.py)
+Capa 2: Cola de entrada (Queue) → thread-safe, productor-consumidor (core/queue_manager.py)
+Capa 3: Workers CPU + GPU       → ThreadPoolExecutor | CUDA | OpenCL, batching GPU por lotes
+                                  + cola de E/S y hilo ImageSaver que guarda a disco
+Capa 4: Agregador de resultados → threading.Lock, métricas, speedup, reporte CSV
+Capa 5: Dashboard en tiempo real → API FastAPI + WebSocket (api/) + React/Vite (frontend/)
 ```
 
 ### Patrón Strategy para backend GPU
 
 Al iniciar, la app detecta hardware en orden CUDA → OpenCL → CPU. Todos los
-backends exponen la misma interfaz `GPUBackend.process(image, operation)`.
+backends exponen la misma interfaz `GPUBackend.process(image, operation)` y
+`process_batch(images, operation)`.
 
 ```
-parallelvision/
+TP-Integrador/
 ├── core/
-│   ├── backend.py          # GPUBackend base + get_backend() + CUDABackend/OpenCLBackend/CPUBackend
+│   ├── backend/            # paquete Strategy (contrato compartido)
+│   │   ├── base.py         # GPUBackend (ABC) + VALID_OPERATIONS + constantes GPU + semáforo
+│   │   ├── factory.py      # get_backend() — detección CUDA → OpenCL → CPU
+│   │   ├── cuda.py         # CUDABackend (Numba CUDA kernels)
+│   │   ├── opencl.py       # OpenCLBackend (PyOpenCL kernels)
+│   │   └── cpu.py          # CPUBackend (OpenCV/Pillow, fallback)
 │   ├── queue_manager.py    # ImageQueue (productor-consumidor)
 │   └── metrics.py          # MetricsCollector (thread-safe con Lock)
 ├── pipeline/
-│   └── worker.py           # ThreadPoolExecutor workers
-├── gui/
-│   └── dashboard.py        # UI Tkinter/PyQt + gráfico matplotlib
-└── main.py
+│   ├── image_loader.py     # escanea carpeta y encola paths (Capa 1)
+│   ├── worker.py           # ProcessingWorker sobre ThreadPoolExecutor
+│   ├── gpu_batcher.py      # GpuBatcher — agrupa imágenes en lotes GPU
+│   ├── image_saver.py      # ImageSaver — hilo de guardado a disco (cola de E/S)
+│   ├── result_aggregator.py# ResultAggregator — consume resultados y actualiza métricas
+│   └── report_exporter.py  # export_csv() del reporte de speedup
+├── api/                    # FastAPI: routes REST, metrics_routes, progress_ws (WebSocket)
+├── frontend/               # SPA React + Vite + TypeScript + Tailwind (dashboard)
+├── colab/                  # notebook para correr el backend CUDA en Colab (T4)
+├── scripts/                # utilidades (ej. descargar_imagenes.py)
+└── main.py                 # entrypoint CLI headless
 ```
-
-### Módulos por integrante
-
-| Rama | Integrante | Módulo |
-|---|---|---|
-| `feature/image-loader-queue` | **Tomás Felice** | Carga de imágenes, Cola, Interfaz gráfica |
-| `feature/cpu-pipeline-backend` | Compañero 1 | Pipeline CPU, detección de backend, `GPUBackend` base |
-| `feature/gpu-cuda-opencl` | Compañero 2 | Backend CUDA (Numba) + OpenCL (PyOpenCL), sync CPU-GPU |
-| `feature/metrics-report` | Compañero 3 | MetricsCollector, reporte CSV, gráfico speedup |
-
-Los archivos `core/backend.py`, `core/queue_manager.py` y `core/metrics.py` son
-**contratos de interfaz compartidos** — no modificar sin coordinar con el equipo.
 
 ## Reglas de código (no negociables)
 
@@ -133,7 +138,8 @@ Para cerrar un issue: incluir `Closes #N` en el cuerpo del commit o en la descri
 
 ## Ramas (GitHub Flow)
 
-- `main` siempre contiene código funcional. Push directo prohibido.
+- La rama de integración es **`develop`** (base de los PR y la entrega); siempre
+  contiene código funcional. Push directo prohibido.
 - Todo cambio entra por PR con al menos **1 revisión aprobada**.
 - Nomenclatura: `<tipo>/<descripcion-en-kebab-case>` (minúsculas, guiones).
   - `feature/image-loader-queue`, `fix/queue-deadlock`, `docs/readme-manual`
@@ -166,13 +172,16 @@ Closes #N
 
 | Área | Herramienta |
 |---|---|
-| Lenguaje | Python 3.11+ |
+| Lenguaje backend | Python 3.11+ |
+| Lenguaje frontend | TypeScript (~5.7) |
 | Concurrencia CPU | `concurrent.futures.ThreadPoolExecutor` |
 | Procesamiento imagen | NumPy, Pillow |
 | GPU NVIDIA | Numba (CUDA kernels) |
 | GPU AMD/Intel | PyOpenCL |
 | Cola | `queue.Queue` |
 | Sync | `threading.Lock`, `threading.Semaphore` |
-| GUI | Tkinter o PyQt5 |
-| Gráficos | matplotlib |
-| Linting | pylint |
+| API / servidor | FastAPI + Uvicorn + WebSockets |
+| GUI (dashboard) | React 18 + Vite + TailwindCSS |
+| Gráficos | Recharts |
+| Túnel Colab | pyngrok |
+| Linting / tests | pylint, pytest |
