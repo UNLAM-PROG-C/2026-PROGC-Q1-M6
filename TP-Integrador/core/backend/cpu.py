@@ -1,31 +1,38 @@
-"""Implementación del backend de procesamiento para CPU."""
+"""Implementación del backend de procesamiento para CPU (Numba JIT)."""
 
 from __future__ import annotations
 
 import math
+
 import numpy as np
 from numba import njit, prange
 
 from core.backend.base import (
-    GPUBackend,
     CPU_BACKEND_NAME,
-    VALID_OPERATIONS,
+    GPUBackend,
     MAX_PIXEL_VALUE,
+    NO_BATCH_TIME,
+    VALID_OPERATIONS,
     BLUR_RADIUS,
     GAUSSIAN_BLUR_WEIGHTS_1D,
     HISTOGRAM_BINS,
     compute_equalize_lut,
+    OP_GRAYSCALE,
+    OP_EDGES,
+    OP_BLUR,
+    OP_EQUALIZE,
+    GRAYSCALE_R,
+    GRAYSCALE_G,
+    GRAYSCALE_B,
+    EDGE_MARGIN,
+    SOBEL_WEIGHT,
 )
 
-GRAYSCALE_R = 0.299
-GRAYSCALE_G = 0.587
-GRAYSCALE_B = 0.114
-EDGE_MARGIN = 1
-SOBEL_WEIGHT = 2.0
 
-@njit(parallel=True)
-def _to_grayscale_jit(image: np.ndarray, output: np.ndarray) -> None:
-    rows, cols = image.shape[:2]
+
+
+@njit(parallel=True, fastmath=True)
+def grayscale_kernel(image: np.ndarray, output: np.ndarray, rows: int, cols: int) -> None:
     for x in prange(rows):
         for y in range(cols):
             r = image[x, y, 0]
@@ -33,43 +40,27 @@ def _to_grayscale_jit(image: np.ndarray, output: np.ndarray) -> None:
             b = image[x, y, 2]
             output[x, y] = GRAYSCALE_R * r + GRAYSCALE_G * g + GRAYSCALE_B * b
 
-def _to_grayscale(image: np.ndarray) -> np.ndarray:
-    """Convierte la imagen a escala de grises manualmente."""
-    output = np.empty(image.shape[:2], dtype=np.uint8)
-    _to_grayscale_jit(image, output)
-    return output
 
-@njit(parallel=True)
-def _detect_edges_jit(image: np.ndarray, output: np.ndarray) -> None:
-    rows, cols = image.shape
+@njit(parallel=True, fastmath=True)
+def edges_kernel(gray: np.ndarray, output: np.ndarray, rows: int, cols: int) -> None:
     for x in prange(EDGE_MARGIN, rows - EDGE_MARGIN):
         for y in range(EDGE_MARGIN, cols - EDGE_MARGIN):
             gx = (
-                -float(image[x-EDGE_MARGIN, y-EDGE_MARGIN]) + float(image[x-EDGE_MARGIN, y+EDGE_MARGIN])
-                - SOBEL_WEIGHT*float(image[x, y-EDGE_MARGIN]) + SOBEL_WEIGHT*float(image[x, y+EDGE_MARGIN])
-                - float(image[x+EDGE_MARGIN, y-EDGE_MARGIN]) + float(image[x+EDGE_MARGIN, y+EDGE_MARGIN])
+                -float(gray[x-1, y-1]) + float(gray[x-1, y+1])
+                - SOBEL_WEIGHT*float(gray[x, y-1]) + SOBEL_WEIGHT*float(gray[x, y+1])
+                - float(gray[x+1, y-1]) + float(gray[x+1, y+1])
             )
             gy = (
-                -float(image[x-EDGE_MARGIN, y-EDGE_MARGIN]) - SOBEL_WEIGHT*float(image[x-EDGE_MARGIN, y]) - float(image[x-EDGE_MARGIN, y+EDGE_MARGIN])
-                + float(image[x+EDGE_MARGIN, y-EDGE_MARGIN]) + SOBEL_WEIGHT*float(image[x+EDGE_MARGIN, y]) + float(image[x+EDGE_MARGIN, y+EDGE_MARGIN])
+                -float(gray[x-1, y-1]) - SOBEL_WEIGHT*float(gray[x-1, y]) - float(gray[x-1, y+1])
+                + float(gray[x+1, y-1]) + SOBEL_WEIGHT*float(gray[x+1, y]) + float(gray[x+1, y+1])
             )
-            magnitude = math.sqrt(gx*gx + gy*gy)
-            output[x, y] = min(magnitude, float(MAX_PIXEL_VALUE))
+            mag = math.sqrt(gx*gx + gy*gy)
+            output[x, y] = min(mag, MAX_PIXEL_VALUE)
 
-def _detect_edges(image: np.ndarray) -> np.ndarray:
-    """Detecta bordes con filtro Sobel manual 2D."""
-    gray = _to_grayscale(image)
-    output = np.zeros_like(gray)
-    _detect_edges_jit(gray, output)
-    return output
 
-def _gaussian_mask() -> np.ndarray:
-    weights = np.array(GAUSSIAN_BLUR_WEIGHTS_1D, dtype=np.float32)
-    return np.outer(weights, weights)
-
-@njit(parallel=True)
-def _apply_blur_jit(image: np.ndarray, output: np.ndarray, mask: np.ndarray, radius: int) -> None:
-    rows, cols, channels = image.shape
+@njit(parallel=True, fastmath=True)
+def blur_kernel(image: np.ndarray, output: np.ndarray, mask: np.ndarray,
+                radius: int, rows: int, cols: int, channels: int) -> None:
     for x in prange(rows):
         for y in range(cols):
             for c in range(channels):
@@ -78,53 +69,85 @@ def _apply_blur_jit(image: np.ndarray, output: np.ndarray, mask: np.ndarray, rad
                     for j in range(-radius, radius + 1):
                         px = min(max(x + i, 0), rows - 1)
                         py = min(max(y + j, 0), cols - 1)
-                        acc += mask[i + radius, j + radius] * image[px, py, c]
+                        w = mask[i + radius, j + radius]
+                        acc += w * image[px, py, c]
                 output[x, y, c] = acc
 
-def _apply_blur(image: np.ndarray) -> np.ndarray:
-    """Aplica desenfoque gaussiano iterando sobre ventana 2D."""
-    output = np.zeros_like(image)
-    mask = _gaussian_mask()
-    _apply_blur_jit(image, output, mask, BLUR_RADIUS)
-    return output
 
-@njit(parallel=True)
-def _map_lut_jit(gray: np.ndarray, lut: np.ndarray, output: np.ndarray) -> None:
-    rows, cols = gray.shape
+@njit(parallel=True, fastmath=True)
+def map_lut_kernel(gray: np.ndarray, lut: np.ndarray, output: np.ndarray,
+                   rows: int, cols: int) -> None:
     for x in prange(rows):
         for y in range(cols):
             output[x, y] = lut[gray[x, y]]
 
-def _equalize(image: np.ndarray) -> np.ndarray:
-    """Ecualiza el histograma usando bincount y mapeo manual."""
-    gray = _to_grayscale(image)
-    hist = np.bincount(gray.ravel(), minlength=HISTOGRAM_BINS).astype(np.uint32)
-    lut = compute_equalize_lut(hist)
-    output = np.empty_like(gray)
-    _map_lut_jit(gray, lut, output)
-    return output
-
-_OPERATIONS = {
-    'grayscale': _to_grayscale,
-    'edges': _detect_edges,
-    'blur': _apply_blur,
-    'equalize': _equalize,
-}
 
 class CPUBackend(GPUBackend):
-    """Aplica operaciones de transformación de imágenes en CPU."""
+    """Procesa imágenes en CPU usando kernels JIT de Numba."""
 
     def __init__(self):
         self.backend_name = CPU_BACKEND_NAME
-        self.device_info = "CPU"
+        self.device_info = "Numba JIT"
 
     def process(self, image: np.ndarray, operation: str) -> np.ndarray:
         if operation not in VALID_OPERATIONS:
             raise ValueError(f'Unknown operation: {operation!r}')
-        return _OPERATIONS[operation](image)
+        if operation == OP_GRAYSCALE:
+            return self._run_grayscale(image)
+        if operation == OP_EDGES:
+            return self._run_edges(image)
+        if operation == OP_BLUR:
+            return self._run_blur(image)
+        if operation == OP_EQUALIZE:
+            return self._run_equalize(image)
+        raise ValueError(f'Unknown operation: {operation!r}')
+
+    def process_batch(
+        self,
+        images: list[np.ndarray],
+        operation: str,
+    ) -> tuple[list[np.ndarray], float | None]:
+        results = [self.process(img, operation) for img in images]
+        return results, NO_BATCH_TIME
 
     def warmup(self, operation: str) -> None:
         shape = (32, 32, 3)
         dummy = np.zeros(shape, dtype=np.uint8)
         self.process(dummy, operation)
 
+    # -------------------------------------------------------------------------
+    # Single Dispatchers
+    # -------------------------------------------------------------------------
+    def _run_grayscale(self, image: np.ndarray) -> np.ndarray:
+        rows, cols = image.shape[:2]
+        output = np.empty((rows, cols), dtype=np.uint8)
+        grayscale_kernel(image, output, rows, cols)
+        return output
+
+    def _run_edges(self, image: np.ndarray) -> np.ndarray:
+        gray = self._run_grayscale(image)
+        rows, cols = gray.shape[:2]
+        output = np.zeros_like(gray)
+        edges_kernel(gray, output, rows, cols)
+        return output
+
+    def _run_blur(self, image: np.ndarray) -> np.ndarray:
+        rows, cols, channels = image.shape
+        output = np.zeros_like(image)
+        mask = _gaussian_mask()
+        blur_kernel(image, output, mask, BLUR_RADIUS, rows, cols, channels)
+        return output
+
+    def _run_equalize(self, image: np.ndarray) -> np.ndarray:
+        gray = self._run_grayscale(image)
+        rows, cols = gray.shape[:2]
+        hist = np.bincount(gray.ravel(), minlength=HISTOGRAM_BINS).astype(np.uint32)
+        lut = compute_equalize_lut(hist)
+        output = np.empty_like(gray)
+        map_lut_kernel(gray, lut, output, rows, cols)
+        return output
+
+
+def _gaussian_mask() -> np.ndarray:
+    weights = np.array(GAUSSIAN_BLUR_WEIGHTS_1D, dtype=np.float32)
+    return np.outer(weights, weights)

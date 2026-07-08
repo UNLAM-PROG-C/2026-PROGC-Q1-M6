@@ -14,7 +14,7 @@ El sistema tiene detección automática de hardware, utilizando el mejor disponi
 |---|---|---|---|
 | NVIDIA GPU | CUDA | Numba | 1 (Más Alta) |
 | AMD / Intel GPU | OpenCL | PyOpenCL | 2 |
-| Cualquier CPU | Multithreading | concurrent.futures | 3 (Más Baja) |
+| Cualquier CPU | Multithreading | NumPy / concurrent.futures | 3 (Más Baja) |
 
 ---
 

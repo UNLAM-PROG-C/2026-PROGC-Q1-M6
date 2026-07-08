@@ -106,7 +106,7 @@ class OpenCLBackend(GPUBackend):  # GPU AMD / Intel integrada
     def process(self, image, operation): ...  # PyOpenCL
 
 class CPUBackend(GPUBackend):     # Fallback sin GPU
-    def process(self, image, operation): ...  # Pillow / OpenCV
+    def process(self, image, operation): ...  # NumPy CPU
 
 def get_backend() -> GPUBackend:
     try:
@@ -167,7 +167,7 @@ Una vez seleccionado el backend, el flujo de datos es el mismo en todos los caso
 | --- | --- | --- |
 | Lenguaje principal | Python 3.11+ | Toda la lógica de la aplicación |
 | Concurrencia CPU | `concurrent.futures` – `ThreadPoolExecutor` | Pool de hilos para procesamiento paralelo en CPU |
-| Procesamiento imagen CPU | Pillow, OpenCV | Transformaciones: blur, bordes, escala de grises |
+| Procesamiento imagen CPU | NumPy, Pure Python | Transformaciones: blur, bordes, escala de grises |
 | Backend GPU NVIDIA | Numba (CUDA) | Kernels paralelos en GPU NVIDIA; compatible con Google Colab |
 | Backend GPU AMD / Intel | PyOpenCL | Kernels paralelos en GPUs con soporte OpenCL (incluye integradas) |
 | Detección de backend | Lógica de runtime propia | Strategy Pattern — selección automática sin intervención del usuario |

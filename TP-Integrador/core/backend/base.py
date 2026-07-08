@@ -7,17 +7,32 @@ import threading
 
 import numpy as np
 
+OP_GRAYSCALE: str = 'grayscale'
+OP_EDGES: str = 'edges'
+OP_BLUR: str = 'blur'
+OP_EQUALIZE: str = 'equalize'
+
 VALID_OPERATIONS: tuple[str, ...] = (
-    'grayscale',
-    'edges',
-    'blur',
-    'equalize',
+    OP_GRAYSCALE,
+    OP_EDGES,
+    OP_BLUR,
+    OP_EQUALIZE,
 )
 GAUSSIAN_KERNEL_SIZE: tuple[int, int] = (5, 5)
 GAUSSIAN_SIGMA: float = 0.0
 CANNY_LOW_THRESHOLD: int = 100
 CANNY_HIGH_THRESHOLD: int = 200
 MAX_PIXEL_VALUE: int = 255
+WARMUP_IMAGE_SIZE: int = 32
+RGB_CHANNELS: int = 3
+GPU_THREADS_PER_BLOCK: int = 16
+
+# Constantes comunes de transformaciones matemáticas
+GRAYSCALE_R: float = 0.299
+GRAYSCALE_G: float = 0.587
+GRAYSCALE_B: float = 0.114
+EDGE_MARGIN: int = 1
+SOBEL_WEIGHT: float = 2.0
 
 # Constantes del desenfoque gaussiano (kernel 5x5 separable).
 BLUR_KERNEL_SIZE: int = 5

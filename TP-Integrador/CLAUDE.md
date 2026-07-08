@@ -168,7 +168,7 @@ Closes #N
 |---|---|
 | Lenguaje | Python 3.11+ |
 | Concurrencia CPU | `concurrent.futures.ThreadPoolExecutor` |
-| Procesamiento imagen | Pillow, OpenCV |
+| Procesamiento imagen | NumPy, Pillow |
 | GPU NVIDIA | Numba (CUDA kernels) |
 | GPU AMD/Intel | PyOpenCL |
 | Cola | `queue.Queue` |
